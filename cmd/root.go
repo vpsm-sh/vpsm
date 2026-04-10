@@ -20,6 +20,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version information, set at build time via ldflags.
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildTime = "unknown"
+)
+
 // rootCmd represents the base command when called without any subcommands.
 func rootCmd() *cobra.Command {
 	var cmd = &cobra.Command{
@@ -37,6 +44,8 @@ Quick start:
   vpsm server create               # Interactive server creation
   vpsm server delete               # Interactive server deletion`,
 	}
+
+	cmd.Version = fmt.Sprintf("%s (commit %s, built %s)", Version, Commit, BuildTime)
 
 	cmd.AddCommand(auth.NewCommand())
 	cmd.AddCommand(auditcmd.NewCommand())
