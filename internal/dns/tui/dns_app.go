@@ -156,7 +156,12 @@ func (m *dnsAppModel) switchToRecordShow(rec domain.Record, domainName string) {
 }
 
 func (m dnsAppModel) Init() tea.Cmd {
-	return m.domainList.Init()
+	switch m.view {
+	case dnsAppViewRecordList:
+		return m.recordList.Init()
+	default:
+		return m.domainList.Init()
+	}
 }
 
 func (m dnsAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
