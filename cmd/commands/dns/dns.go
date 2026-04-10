@@ -2,13 +2,11 @@ package dns
 
 import (
 	"fmt"
-	"os"
 
 	"nathanbeddoewebdev/vpsm/internal/config"
 	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
 	"nathanbeddoewebdev/vpsm/internal/dns/services"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
-	"nathanbeddoewebdev/vpsm/internal/swrcache"
 
 	"github.com/spf13/cobra"
 )
@@ -62,10 +60,5 @@ func newDNSService(cmd *cobra.Command) (*services.Service, error) {
 		return nil, err
 	}
 
-	if os.Getenv("VPSM_DISABLE_DNS_CACHE") == "1" {
-		return services.New(provider), nil
-	}
-
-	cache := swrcache.NewDefault()
-	return services.New(provider, services.WithCache(cache)), nil
+	return services.New(provider), nil
 }
