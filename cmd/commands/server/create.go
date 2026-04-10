@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/server/domain"
 	"nathanbeddoewebdev/vpsm/internal/server/providers"
 	"nathanbeddoewebdev/vpsm/internal/server/tui"
@@ -45,7 +46,8 @@ Examples:
   vpsm server create --provider hetzner \
     --name web-1 --image ubuntu-24.04 --type cpx11 \
     -o json`,
-		Run: runCreate,
+		RunE:         runCreate,
+		SilenceUsage: true,
 	}
 
 	// Required for flag mode
@@ -66,13 +68,12 @@ Examples:
 	return cmd
 }
 
-func runCreate(cmd *cobra.Command, args []string) {
+func runCreate(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	name, _ := cmd.Flags().GetString("name")
@@ -96,8 +97,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 
 	if name != "" {
 		if err := util.ValidateServerName(name); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
+			return err
 		}
 	}
 
@@ -128,29 +128,24 @@ func runCreate(cmd *cobra.Command, args []string) {
 	if useInteractive {
 		// Interactive mode requires a terminal.
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: missing required flag(s): %s\n", strings.Join(missing, ", "))
-			fmt.Fprintln(cmd.ErrOrStderr(), "Interactive mode requires a terminal. Provide all flags for non-interactive use.")
-			return
+			return fmt.Errorf("missing required flag(s): %s (interactive mode requires a terminal)", strings.Join(missing, ", "))
 		}
 
 		catalogProvider, ok := provider.(domain.CatalogProvider)
 		if !ok {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: missing required flag(s): %s\n", strings.Join(missing, ", "))
-			fmt.Fprintln(cmd.ErrOrStderr(), "Interactive mode is not supported for this provider.")
-			return
+			return fmt.Errorf("missing required flag(s): %s (interactive mode not supported for provider)", strings.Join(missing, ", "))
 		}
 
 		finalOpts, err := tui.RunServerCreate(catalogProvider, providerName, opts)
 		if err != nil {
 			if errors.Is(err, tui.ErrAborted) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "Server creation cancelled.")
-				return
+				return nil
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
+			return err
 		}
 		if finalOpts == nil {
-			return
+			return nil
 		}
 		opts = *finalOpts
 	}
@@ -161,9 +156,15 @@ func runCreate(cmd *cobra.Command, args []string) {
 	server, err := provider.CreateServer(ctx, opts)
 	if err != nil {
 		logCreateOptsFull(cmd, opts)
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error creating server: %v\n", err)
-		return
+		return fmt.Errorf("failed to create server: %w", err)
 	}
+
+	cmd.SetContext(auditlog.WithMetadata(cmd.Context(), auditlog.Metadata{
+		Provider:     providerName,
+		ResourceType: "server",
+		ResourceID:   server.ID,
+		ResourceName: server.Name,
+	}))
 
 	output, _ := cmd.Flags().GetString("output")
 	switch output {
@@ -172,6 +173,8 @@ func runCreate(cmd *cobra.Command, args []string) {
 	default:
 		printCreateTable(cmd, server)
 	}
+
+	return nil
 }
 
 func logCreateOpts(cmd *cobra.Command, opts domain.CreateServerOpts) {

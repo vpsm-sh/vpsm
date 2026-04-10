@@ -26,8 +26,9 @@ func GetCommand() *cobra.Command {
 			"\nExamples:\n" +
 			"  vpsm config get                   # interactive viewer\n" +
 			"  vpsm config get --key default-provider   # print a single value",
-		Args: cobra.ExactArgs(0),
-		Run:  runGet,
+		Args:         cobra.ExactArgs(0),
+		RunE:         runGet,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("key", "", "Configuration key to fetch (prints a single value)")
@@ -35,7 +36,7 @@ func GetCommand() *cobra.Command {
 	return cmd
 }
 
-func runGet(cmd *cobra.Command, args []string) {
+func runGet(cmd *cobra.Command, args []string) error {
 	keyFlag, _ := cmd.Flags().GetString("key")
 	keyFlag = strings.TrimSpace(keyFlag)
 
@@ -43,16 +44,15 @@ func runGet(cmd *cobra.Command, args []string) {
 	if keyFlag == "" {
 		if term.IsTerminal(int(os.Stdout.Fd())) {
 			if err := tui.RunConfigView(); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				return fmt.Errorf("config view failed: %w", err)
 			}
-			return
+			return nil
 		}
 
 		// Non-interactive: list all values.
 		cfg, err := config.Load()
 		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
+			return fmt.Errorf("failed to load config: %w", err)
 		}
 		for _, spec := range config.Keys {
 			value := spec.Get(cfg)
@@ -61,22 +61,19 @@ func runGet(cmd *cobra.Command, args []string) {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", spec.Name, value)
 		}
-		return
+		return nil
 	}
 
 	key := util.NormalizeKey(keyFlag)
 
 	spec := config.Lookup(key)
 	if spec == nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown configuration key %q\n", keyFlag)
-		fmt.Fprintf(cmd.ErrOrStderr(), "Valid keys: %s\n", strings.Join(config.KeyNames(), ", "))
-		return
+		return fmt.Errorf("unknown configuration key %q (valid: %s)", keyFlag, strings.Join(config.KeyNames(), ", "))
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	value := spec.Get(cfg)
@@ -85,4 +82,5 @@ func runGet(cmd *cobra.Command, args []string) {
 	} else {
 		fmt.Fprintln(cmd.OutOrStdout(), value)
 	}
+	return nil
 }

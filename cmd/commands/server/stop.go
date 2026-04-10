@@ -7,6 +7,7 @@ import (
 	"os/signal"
 
 	"nathanbeddoewebdev/vpsm/internal/actionstore"
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/server/domain"
 	"nathanbeddoewebdev/vpsm/internal/server/providers"
 	"nathanbeddoewebdev/vpsm/internal/server/services/action"
@@ -32,7 +33,8 @@ action can be resumed with "vpsm server actions --resume".
 
 Examples:
   vpsm server stop --provider hetzner --id 12345`,
-		Run: runStop,
+		RunE:         runStop,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("id", "", "Server ID to stop (required)")
@@ -41,13 +43,12 @@ Examples:
 	return cmd
 }
 
-func runStop(cmd *cobra.Command, args []string) {
+func runStop(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
@@ -59,8 +60,7 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	actionStatus, err := provider.StopServer(ctx, serverID)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error stopping server: %v\n", err)
-		return
+		return fmt.Errorf("failed to stop server: %w", err)
 	}
 
 	// Open the action repository. If unavailable, repo is set to nil
@@ -77,10 +77,17 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	if err := svc.WaitForAction(ctx, actionStatus, serverID, "off", cmd.ErrOrStderr()); err != nil {
 		svc.FinalizeAction(record, domain.ActionStatusError, err.Error())
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error waiting for server to stop: %v\n", err)
-		return
+		return fmt.Errorf("failed waiting for server to stop: %w", err)
 	}
 
 	svc.FinalizeAction(record, domain.ActionStatusSuccess, "")
+
+	cmd.SetContext(auditlog.WithMetadata(cmd.Context(), auditlog.Metadata{
+		Provider:     providerName,
+		ResourceType: "server",
+		ResourceID:   serverID,
+	}))
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s stop initiated successfully.\n", serverID)
+	return nil
 }

@@ -159,7 +159,7 @@ func RunServerShow(provider domain.Provider, providerName string, serverID strin
 		providerName: providerName,
 		loading:      true,
 		spinner:      s,
-		poller:       newTogglePoller(provider),
+		poller:       newTogglePoller(provider, providerName),
 		viewport:     vp,
 	}
 
@@ -203,7 +203,7 @@ func RunServerShowDirect(provider domain.Provider, providerName string, server *
 		loading:        false,
 		metricsLoading: true,
 		spinner:        s,
-		poller:         newTogglePoller(provider),
+		poller:         newTogglePoller(provider, providerName),
 		viewport:       vp,
 	}
 

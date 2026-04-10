@@ -7,6 +7,7 @@ import (
 	"os/signal"
 
 	"nathanbeddoewebdev/vpsm/internal/actionstore"
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/server/domain"
 	"nathanbeddoewebdev/vpsm/internal/server/providers"
 	"nathanbeddoewebdev/vpsm/internal/server/services/action"
@@ -30,7 +31,8 @@ action can be resumed with "vpsm server actions --resume".
 
 Examples:
   vpsm server start --provider hetzner --id 12345`,
-		Run: runStart,
+		RunE:         runStart,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("id", "", "Server ID to start (required)")
@@ -39,13 +41,12 @@ Examples:
 	return cmd
 }
 
-func runStart(cmd *cobra.Command, args []string) {
+func runStart(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
@@ -57,8 +58,7 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	actionStatus, err := provider.StartServer(ctx, serverID)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error starting server: %v\n", err)
-		return
+		return fmt.Errorf("failed to start server: %w", err)
 	}
 
 	// Open the action repository. If unavailable, repo is set to nil
@@ -75,10 +75,17 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	if err := svc.WaitForAction(ctx, actionStatus, serverID, "running", cmd.ErrOrStderr()); err != nil {
 		svc.FinalizeAction(record, domain.ActionStatusError, err.Error())
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	svc.FinalizeAction(record, domain.ActionStatusSuccess, "")
+
+	cmd.SetContext(auditlog.WithMetadata(cmd.Context(), auditlog.Metadata{
+		Provider:     providerName,
+		ResourceType: "server",
+		ResourceID:   serverID,
+	}))
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s started successfully.\n", serverID)
+	return nil
 }

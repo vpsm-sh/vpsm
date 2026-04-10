@@ -11,27 +11,16 @@ package actionstore
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"nathanbeddoewebdev/vpsm/internal/database"
 )
-
-const (
-	appDir = "vpsm"
-	dbFile = "vpsm.db"
-)
-
-// pathOverride, when non-empty, replaces the default database path.
-// Intended for testing. Use SetPath / ResetPath to manage.
-var pathOverride string
 
 // SetPath overrides the database path. Intended for testing.
-func SetPath(p string) { pathOverride = p }
+func SetPath(p string) { database.SetPath(p) }
 
 // ResetPath clears the path override. Intended for testing.
-func ResetPath() { pathOverride = "" }
+func ResetPath() { database.ResetPath() }
 
 // ActionRepository defines the persistence interface for action records.
 type ActionRepository interface {
@@ -65,14 +54,11 @@ type SQLiteRepository struct {
 
 // DefaultPath returns the default database path.
 func DefaultPath() (string, error) {
-	if pathOverride != "" {
-		return pathOverride, nil
-	}
-	base, err := os.UserConfigDir()
+	path, err := database.DefaultPath()
 	if err != nil {
-		return "", fmt.Errorf("actions: unable to determine config directory: %w", err)
+		return "", fmt.Errorf("actions: %w", err)
 	}
-	return filepath.Join(base, appDir, dbFile), nil
+	return path, nil
 }
 
 // Open creates or opens the action repository at the default path.
@@ -87,14 +73,9 @@ func Open() (*SQLiteRepository, error) {
 // OpenAt creates or opens a SQLite database at the given path.
 // The parent directory is created if it does not exist.
 func OpenAt(path string) (*SQLiteRepository, error) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("actions: failed to create directory %s: %w", dir, err)
-	}
-
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)")
+	db, err := database.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("actions: failed to open database: %w", err)
+		return nil, fmt.Errorf("actions: %w", err)
 	}
 
 	r := &SQLiteRepository{db: db}

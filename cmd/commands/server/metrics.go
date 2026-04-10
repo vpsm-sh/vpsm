@@ -27,7 +27,8 @@ Examples:
 
   # JSON output for scripting
   vpsm server metrics --provider hetzner --id 12345 -o json`,
-		Run: runMetrics,
+		RunE:         runMetrics,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("id", "", "Server ID (required)")
@@ -37,19 +38,17 @@ Examples:
 	return cmd
 }
 
-func runMetrics(cmd *cobra.Command, args []string) {
+func runMetrics(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	mp, ok := provider.(domain.MetricsProvider)
 	if !ok {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: provider %q does not support metrics\n", providerName)
-		return
+		return fmt.Errorf("provider %q does not support metrics", providerName)
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
@@ -64,8 +63,7 @@ func runMetrics(cmd *cobra.Command, args []string) {
 		domain.MetricNetwork,
 	}, start, end)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching metrics: %v\n", err)
-		return
+		return fmt.Errorf("failed to fetch metrics: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -75,4 +73,6 @@ func runMetrics(cmd *cobra.Command, args []string) {
 	default:
 		printMetricsSummary(cmd, metrics)
 	}
+
+	return nil
 }

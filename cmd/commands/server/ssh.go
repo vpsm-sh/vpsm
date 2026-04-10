@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/server/providers"
 	"nathanbeddoewebdev/vpsm/internal/serverprefs"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
@@ -33,7 +34,8 @@ username for this server (stored locally), or "root" if never set.
 Examples:
   vpsm server ssh --provider hetzner --id 12345
   vpsm server ssh --provider hetzner --id 12345 --user ubuntu`,
-		Run: runSSH,
+		RunE:         runSSH,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("id", "", "Server ID to connect to (required)")
@@ -43,32 +45,34 @@ Examples:
 	return cmd
 }
 
-func runSSH(cmd *cobra.Command, args []string) {
+func runSSH(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
 	userFlag, _ := cmd.Flags().GetString("user")
+
+	cmd.SetContext(auditlog.WithMetadata(cmd.Context(), auditlog.Metadata{
+		Provider:     providerName,
+		ResourceType: "server",
+		ResourceID:   serverID,
+	}))
 
 	ctx := context.Background()
 
 	// Fetch the server.
 	server, err := provider.GetServer(ctx, serverID)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", err)
-		return
+		return fmt.Errorf("failed to fetch server: %w", err)
 	}
 
 	// Check that the server is running.
 	if server.Status != "running" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: Server %s is not running (status: %s)\n", serverID, server.Status)
-		fmt.Fprintf(cmd.ErrOrStderr(), "Start the server first with: vpsm server start --provider %s --id %s\n", providerName, serverID)
-		return
+		return fmt.Errorf("server %s is not running (status: %s); start with: vpsm server start --provider %s --id %s", serverID, server.Status, providerName, serverID)
 	}
 
 	// Resolve IP address (IPv4 preferred, IPv6 fallback).
@@ -77,8 +81,7 @@ func runSSH(cmd *cobra.Command, args []string) {
 		ipAddress = server.PublicIPv6
 	}
 	if ipAddress == "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: Server %s has no public IP address\n", serverID)
-		return
+		return fmt.Errorf("server %s has no public IP address", serverID)
 	}
 
 	// Open serverprefs repository (best-effort, like actionstore pattern).
@@ -110,11 +113,14 @@ func runSSH(cmd *cobra.Command, args []string) {
 	}
 
 	// Attempt SSH connection with retry on host key conflict.
-	connectSSH(cmd, providerName, serverID, username, ipAddress)
+	if err := connectSSH(cmd, providerName, serverID, username, ipAddress); err != nil {
+		return err
+	}
+	return nil
 }
 
 // connectSSH attempts to SSH into the server, handling host key conflicts.
-func connectSSH(cmd *cobra.Command, providerName, serverID, username, ipAddress string) {
+func connectSSH(cmd *cobra.Command, providerName, serverID, username, ipAddress string) error {
 	// Build SSH command.
 	sshCmd := exec.Command("ssh",
 		"-o", "StrictHostKeyChecking=accept-new",
@@ -135,7 +141,7 @@ func connectSSH(cmd *cobra.Command, providerName, serverID, username, ipAddress 
 	err := sshCmd.Run()
 	if err == nil {
 		// SSH succeeded — exit cleanly.
-		return
+		return nil
 	}
 
 	// SSH failed — analyze stderr to provide better error messages.
@@ -159,17 +165,17 @@ func connectSSH(cmd *cobra.Command, providerName, serverID, username, ipAddress 
 			fmt.Fprintf(cmd.ErrOrStderr(), "Clearing old host key for %s...\n", ipAddress)
 			clearCmd := exec.Command("ssh-keygen", "-R", ipAddress)
 			if clearErr := clearCmd.Run(); clearErr != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error clearing host key: %v\n", clearErr)
-				return
+				return fmt.Errorf("failed to clear host key: %w", clearErr)
 			}
 
 			// Retry SSH connection.
 			fmt.Fprintf(cmd.ErrOrStderr(), "Retrying SSH connection...\n")
-			connectSSH(cmd, providerName, serverID, username, ipAddress)
+			return connectSSH(cmd, providerName, serverID, username, ipAddress)
 		}
-		return
+		return fmt.Errorf("ssh connection failed due to host key conflict")
 	}
 
 	// Other SSH errors — just print a generic message.
 	fmt.Fprintf(cmd.ErrOrStderr(), "\nSSH connection failed.\n")
+	return fmt.Errorf("ssh connection failed")
 }

@@ -90,14 +90,16 @@ type toggleOutcome struct {
 // method returns a non-nil *toggleOutcome for the parent to act on.
 type togglePoller struct {
 	provider     domain.Provider
-	active       bool   // true while a toggle + poll cycle is in flight
-	pollMode     string // "action" or "server"
-	actionID     string // provider action ID (pollModeAction)
-	pollServerID string // server ID being toggled
-	pollTarget   string // target server status (pollModeServer)
-	toggleVerb   string // "started" or "stopped"
-	toggleName   string // server name (for messages)
-	pollCount    int    // number of polls fired so far
+	providerName string    // used for audit log entries
+	active       bool      // true while a toggle + poll cycle is in flight
+	pollMode     string    // "action" or "server"
+	actionID     string    // provider action ID (pollModeAction)
+	pollServerID string    // server ID being toggled
+	pollTarget   string    // target server status (pollModeServer)
+	toggleVerb   string    // "started" or "stopped"
+	toggleName   string    // server name (for messages)
+	pollCount    int       // number of polls fired so far
+	startedAt    time.Time // when InitiateToggle was called (for audit duration)
 
 	// consecutiveErrors tracks transient poll failures. Rate-limit errors
 	// always abort immediately; other errors are tolerated up to
@@ -115,8 +117,8 @@ type togglePoller struct {
 const maxTUITransientErrors = 3
 
 // newTogglePoller creates a poller bound to the given provider.
-func newTogglePoller(provider domain.Provider) togglePoller {
-	return togglePoller{provider: provider}
+func newTogglePoller(provider domain.Provider, providerName string) togglePoller {
+	return togglePoller{provider: provider, providerName: providerName}
 }
 
 // --- Commands ---
@@ -124,7 +126,8 @@ func newTogglePoller(provider domain.Provider) togglePoller {
 // InitiateToggle fires the initial StartServer or StopServer API call.
 // It returns a tea.Cmd that produces a serverToggleInitiatedMsg (or
 // serverToggleErrorMsg on failure).
-func (tp togglePoller) InitiateToggle(server domain.Server) tea.Cmd {
+func (tp *togglePoller) InitiateToggle(server domain.Server) tea.Cmd {
+	tp.startedAt = time.Now().UTC()
 	provider := tp.provider
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -191,6 +194,8 @@ func (tp togglePoller) HandleInitiated(msg serverToggleInitiatedMsg) (togglePoll
 		if action.ErrorMessage != "" {
 			errMsg = action.ErrorMessage
 		}
+		fastErr := fmt.Errorf("%s", errMsg)
+		recordAudit(tp.providerName, opAuditCommand(msg.verb), "server", msg.serverID, msg.serverName, fastErr, tp.startedAt)
 		return tp, nil, &toggleOutcome{
 			StatusText: fmt.Sprintf("Failed to %s server %q: %s", verbToInfinitive(msg.verb), msg.serverName, errMsg),
 			IsError:    true,
@@ -243,6 +248,7 @@ func (tp togglePoller) HandlePollResult(msg pollActionResultMsg) (togglePoller, 
 		// pollModeServer: the server has reached the target status.
 		tp.active = false
 		tp.pollCount = 0
+		recordAudit(tp.providerName, opAuditCommand(tp.toggleVerb), "server", tp.pollServerID, tp.toggleName, nil, tp.startedAt)
 		return tp, nil, &toggleOutcome{
 			Success:    true,
 			ServerName: tp.toggleName,
@@ -256,6 +262,8 @@ func (tp togglePoller) HandlePollResult(msg pollActionResultMsg) (togglePoller, 
 		if status.ErrorMessage != "" {
 			errMsg = status.ErrorMessage
 		}
+		pollErrStatus := fmt.Errorf("%s", errMsg)
+		recordAudit(tp.providerName, opAuditCommand(tp.toggleVerb), "server", tp.pollServerID, tp.toggleName, pollErrStatus, tp.startedAt)
 		return tp, nil, &toggleOutcome{
 			StatusText: fmt.Sprintf("Failed to %s server %q: %s", verbToInfinitive(tp.toggleVerb), tp.toggleName, errMsg),
 			IsError:    true,
@@ -267,10 +275,11 @@ func (tp togglePoller) HandlePollResult(msg pollActionResultMsg) (togglePoller, 
 		if tp.pollCount >= tuiMaxPollAttempts {
 			tp.active = false
 			tp.pollCount = 0
+			timeoutErr := fmt.Errorf("timed out waiting for server %q to %s", tp.toggleName, verbToInfinitive(tp.toggleVerb))
+			recordAudit(tp.providerName, opAuditCommand(tp.toggleVerb), "server", tp.pollServerID, tp.toggleName, timeoutErr, tp.startedAt)
 			return tp, nil, &toggleOutcome{
-				StatusText: fmt.Sprintf("Timed out waiting for server %q to %s",
-					tp.toggleName, verbToInfinitive(tp.toggleVerb)),
-				IsError: true,
+				StatusText: timeoutErr.Error(),
+				IsError:    true,
 			}
 		}
 
@@ -297,6 +306,8 @@ func (tp togglePoller) HandlePollError(msg pollActionErrorMsg) (togglePoller, te
 		tp.active = false
 		tp.pollCount = 0
 		tp.consecutiveErrors = 0
+		rateLimitErr := fmt.Errorf("polling stopped (rate limited)")
+		recordAudit(tp.providerName, opAuditCommand(tp.toggleVerb), "server", tp.pollServerID, tp.toggleName, rateLimitErr, tp.startedAt)
 		return tp, nil, &toggleOutcome{
 			StatusText: "Polling stopped (rate limited)",
 			IsError:    true,
@@ -308,8 +319,10 @@ func (tp togglePoller) HandlePollError(msg pollActionErrorMsg) (togglePoller, te
 		tp.active = false
 		tp.pollCount = 0
 		tp.consecutiveErrors = 0
+		pollErr := fmt.Errorf("error polling (after %d consecutive failures): %v", tp.consecutiveErrors, msg.err)
+		recordAudit(tp.providerName, opAuditCommand(tp.toggleVerb), "server", tp.pollServerID, tp.toggleName, pollErr, tp.startedAt)
 		return tp, nil, &toggleOutcome{
-			StatusText: fmt.Sprintf("Error polling (after %d consecutive failures): %v", tp.consecutiveErrors, msg.err),
+			StatusText: pollErr.Error(),
 			IsError:    true,
 		}
 	}

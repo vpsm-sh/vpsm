@@ -14,7 +14,8 @@ func NewCommand() *cobra.Command {
 		Short:             "Manage servers across cloud providers",
 		Long:              `Create, list, show, and delete servers from your configured cloud providers.`,
 		PersistentPreRunE: resolveProvider,
-		Run:               runList,
+		RunE:              runList,
+		SilenceUsage:      true,
 	}
 
 	cmd.AddCommand(ActionsCommand())

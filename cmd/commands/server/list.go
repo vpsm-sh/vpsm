@@ -33,7 +33,8 @@ Examples:
 
   # JSON output for scripting
   vpsm server list -o json`,
-		Run: runList,
+		RunE:         runList,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringP("output", "o", "", "Output format: table or json (omit for interactive TUI)")
@@ -41,13 +42,12 @@ Examples:
 	return cmd
 }
 
-func runList(cmd *cobra.Command, args []string) {
+func runList(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -57,34 +57,33 @@ func runList(cmd *cobra.Command, args []string) {
 		if output == "" {
 			output = "table"
 		}
-		runListNonInteractive(cmd, provider, output)
-		return
+		return runListNonInteractive(cmd, provider, output)
 	}
 
 	// Interactive full-window TUI. Runs a single Bubbletea program that
 	// manages all view transitions (list, show, delete, create) internally,
 	// eliminating screen flicker between views.
 	if _, err := tui.RunServerApp(provider, providerName); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+		return fmt.Errorf("server list failed: %w", err)
 	}
+	return nil
 }
 
-func runListNonInteractive(cmd *cobra.Command, provider domain.Provider, output string) {
+func runListNonInteractive(cmd *cobra.Command, provider domain.Provider, output string) error {
 	ctx := context.Background()
 	servers, err := provider.ListServers(ctx)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error listing servers: %v\n", err)
-		return
+		return fmt.Errorf("failed to list servers: %w", err)
 	}
 
 	if output == "json" {
 		printServersJSON(cmd, servers)
-		return
+		return nil
 	}
 
 	if len(servers) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No servers found.")
-		return
+		return nil
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
@@ -104,4 +103,5 @@ func runListNonInteractive(cmd *cobra.Command, provider domain.Provider, output 
 	}
 
 	w.Flush()
+	return nil
 }

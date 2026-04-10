@@ -34,7 +34,8 @@ Examples:
   vpsm server actions                     # Show pending actions
   vpsm server actions --all               # Show all recent actions
   vpsm server actions --resume            # Resume polling pending actions`,
-		Run: runActions,
+		RunE:         runActions,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().Bool("all", false, "Show all recent actions, not just pending")
@@ -43,22 +44,20 @@ Examples:
 	return cmd
 }
 
-func runActions(cmd *cobra.Command, args []string) {
+func runActions(cmd *cobra.Command, args []string) error {
 	showAll, _ := cmd.Flags().GetBool("all")
 	resume, _ := cmd.Flags().GetBool("resume")
 
 	repo, err := actionstore.Open()
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error opening action store: %v\n", err)
-		return
+		return fmt.Errorf("failed to open action store: %w", err)
 	}
 	defer repo.Close()
 
 	svc := action.NewService(nil, "", repo)
 
 	if resume {
-		resumePendingActions(cmd, svc, repo)
-		return
+		return resumePendingActions(cmd, svc, repo)
 	}
 
 	var records []actionstore.ActionRecord
@@ -68,8 +67,7 @@ func runActions(cmd *cobra.Command, args []string) {
 		records, err = svc.ListPending()
 	}
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error listing actions: %v\n", err)
-		return
+		return fmt.Errorf("failed to list actions: %w", err)
 	}
 
 	if len(records) == 0 {
@@ -78,7 +76,7 @@ func runActions(cmd *cobra.Command, args []string) {
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "No pending actions.")
 		}
-		return
+		return nil
 	}
 
 	printActions(cmd, records)
@@ -87,6 +85,8 @@ func runActions(cmd *cobra.Command, args []string) {
 	if !showAll {
 		fmt.Fprintf(cmd.ErrOrStderr(), "\nUse --resume to resume polling these actions.\n")
 	}
+
+	return nil
 }
 
 func printActions(cmd *cobra.Command, records []actionstore.ActionRecord) {
@@ -109,16 +109,15 @@ func printActions(cmd *cobra.Command, records []actionstore.ActionRecord) {
 	w.Flush()
 }
 
-func resumePendingActions(cmd *cobra.Command, svc *action.Service, repo actionstore.ActionRepository) {
+func resumePendingActions(cmd *cobra.Command, svc *action.Service, repo actionstore.ActionRepository) error {
 	pending, err := svc.ListPending()
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error listing pending actions: %v\n", err)
-		return
+		return fmt.Errorf("failed to list pending actions: %w", err)
 	}
 
 	if len(pending) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No pending actions to resume.")
-		return
+		return nil
 	}
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "Resuming %d pending action(s)...\n\n", len(pending))
@@ -130,6 +129,8 @@ func resumePendingActions(cmd *cobra.Command, svc *action.Service, repo actionst
 		record := &pending[i]
 		resumeAction(ctx, cmd, repo, record)
 	}
+
+	return nil
 }
 
 func resumeAction(ctx context.Context, cmd *cobra.Command, repo actionstore.ActionRepository, record *actionstore.ActionRecord) {

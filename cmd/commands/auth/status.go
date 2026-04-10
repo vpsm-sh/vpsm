@@ -23,15 +23,15 @@ func StatusCommand() *cobra.Command {
 
 Example:
   vpsm auth status`,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			store := auth.DefaultStore()
 
 			// Use TUI in interactive terminal.
 			if term.IsTerminal(int(os.Stdout.Fd())) {
 				if err := tui.RunAuthStatus(store); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+					return fmt.Errorf("auth status failed: %w", err)
 				}
-				return
+				return nil
 			}
 
 			// Non-interactive fallback: check all known credential specs first,
@@ -71,7 +71,9 @@ Example:
 					fmt.Fprintf(cmd.OutOrStdout(), "%s: error (%v)\n", providerName, err)
 				}
 			}
+			return nil
 		},
+		SilenceUsage: true,
 	}
 
 	return cmd

@@ -122,8 +122,9 @@ type operation struct {
 	provider   string // provider name for database persistence
 	serverID   string
 	serverName string
-	verb       string // "started" or "stopped"
-	target     string // target server status
+	verb       string    // "started" or "stopped"
+	target     string    // target server status
+	startedAt  time.Time // when the operation was initiated (for audit duration)
 
 	pollMode  string // "action" or "server"
 	actionID  string
@@ -349,6 +350,7 @@ func (o opsOverlay) StartToggle(server domain.Server) (opsOverlay, tea.Cmd) {
 		serverName: server.Name,
 		verb:       verb,
 		target:     target,
+		startedAt:  time.Now().UTC(),
 		status:     opStatusActive,
 		statusText: fmt.Sprintf("%s %q...", verbToGerund(verb), server.Name),
 	}
@@ -457,6 +459,7 @@ func (o opsOverlay) handleInitiated(msg opToggleInitiatedMsg) (opsOverlay, tea.C
 		op.statusText = fmt.Sprintf("Failed: %s", errMsg)
 		o.ops[idx] = op
 		o.saveOp(op)
+		recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, fmt.Errorf("%s", errMsg), op.startedAt)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: fmt.Sprintf("Failed to %s server %q: %s", verbToInfinitive(op.verb), op.serverName, errMsg),
 		}}
@@ -485,6 +488,7 @@ func (o opsOverlay) handleToggleError(msg opToggleErrorMsg) (opsOverlay, tea.Cmd
 	op.statusText = "Failed: " + msg.err.Error()
 	o.ops[idx] = op
 	o.saveOp(op)
+	recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, msg.err, op.startedAt)
 	return o, scheduleDismiss(op.id), []opCompletedEvent{{
 		ErrText: msg.err.Error(),
 	}}
@@ -528,6 +532,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 		op.progress = 100
 		o.ops[idx] = op
 		o.saveOp(op)
+		recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, nil, op.startedAt)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			Success:    true,
 			ServerName: op.serverName,
@@ -543,6 +548,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 		op.statusText = fmt.Sprintf("Failed: %s", errMsg)
 		o.ops[idx] = op
 		o.saveOp(op)
+		recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, fmt.Errorf("%s", errMsg), op.startedAt)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: fmt.Sprintf("Failed to %s server %q: %s", verbToInfinitive(op.verb), op.serverName, errMsg),
 		}}
@@ -555,8 +561,10 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 			op.statusText = fmt.Sprintf("Timed out %s %q", verbToGerund(op.verb), op.serverName)
 			o.ops[idx] = op
 			o.saveOp(op)
+			timeoutErr := fmt.Errorf("timed out waiting for server %q to %s", op.serverName, verbToInfinitive(op.verb))
+			recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, timeoutErr, op.startedAt)
 			return o, scheduleDismiss(op.id), []opCompletedEvent{{
-				ErrText: fmt.Sprintf("Timed out waiting for server %q to %s", op.serverName, verbToInfinitive(op.verb)),
+				ErrText: timeoutErr.Error(),
 			}}
 		}
 
@@ -585,6 +593,8 @@ func (o opsOverlay) handlePollError(msg opPollErrorMsg) (opsOverlay, tea.Cmd, []
 		op.statusText = "Rate limited"
 		o.ops[idx] = op
 		o.saveOp(op)
+		rateLimitErr := fmt.Errorf("polling stopped (rate limited)")
+		recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, rateLimitErr, op.startedAt)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: "Polling stopped (rate limited)",
 		}}
@@ -596,8 +606,10 @@ func (o opsOverlay) handlePollError(msg opPollErrorMsg) (opsOverlay, tea.Cmd, []
 		op.statusText = fmt.Sprintf("Failed after %d errors", op.consecutiveErrors)
 		o.ops[idx] = op
 		o.saveOp(op)
+		pollErr := fmt.Errorf("error polling (after %d consecutive failures): %v", op.consecutiveErrors, msg.err)
+		recordAudit(op.provider, opAuditCommand(op.verb), "server", op.serverID, op.serverName, pollErr, op.startedAt)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
-			ErrText: fmt.Sprintf("Error polling (after %d consecutive failures): %v", op.consecutiveErrors, msg.err),
+			ErrText: pollErr.Error(),
 		}}
 	}
 
@@ -663,6 +675,19 @@ func (o opsOverlay) doPoll(op operation) tea.Cmd {
 }
 
 // --- Helpers ---
+
+// opAuditCommand maps a past-tense toggle verb to the corresponding CLI
+// command path used in audit log entries.
+func opAuditCommand(verb string) string {
+	switch verb {
+	case "started":
+		return "vpsm server start"
+	case "stopped":
+		return "vpsm server stop"
+	default:
+		return "vpsm server"
+	}
+}
 
 func (o opsOverlay) findOp(opID int) int {
 	for i, op := range o.ops {

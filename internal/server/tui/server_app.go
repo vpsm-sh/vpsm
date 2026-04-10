@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/server/domain"
 	"nathanbeddoewebdev/vpsm/internal/serverprefs"
@@ -146,10 +147,11 @@ type serverAppModel struct {
 	prefsSvc *prefssvc.Service
 
 	// Action state (appViewAction).
-	actionSpinner spinner.Model
-	actionLabel   string
-	actionStatus  string
-	actionIsError bool
+	actionSpinner   spinner.Model
+	actionLabel     string
+	actionStatus    string
+	actionIsError   bool
+	actionStartTime time.Time // when the current create/delete action was initiated
 
 	width  int
 	height int
@@ -515,6 +517,7 @@ func (m serverAppModel) startDeleteAction(server domain.Server) (tea.Model, tea.
 	m.actionLabel = fmt.Sprintf("Deleting server %q...", server.Name)
 	m.actionStatus = ""
 	m.actionIsError = false
+	m.actionStartTime = time.Now().UTC()
 
 	provider := m.provider
 	return m, tea.Batch(m.actionSpinner.Tick, func() tea.Msg {
@@ -528,6 +531,7 @@ func (m serverAppModel) startCreateAction(opts domain.CreateServerOpts) (tea.Mod
 	m.actionLabel = fmt.Sprintf("Creating server %q...", opts.Name)
 	m.actionStatus = ""
 	m.actionIsError = false
+	m.actionStartTime = time.Now().UTC()
 
 	provider := m.provider
 	return m, tea.Batch(m.actionSpinner.Tick, func() tea.Msg {
@@ -537,6 +541,8 @@ func (m serverAppModel) startCreateAction(opts domain.CreateServerOpts) (tea.Mod
 }
 
 func (m serverAppModel) handleDeleteResult(msg deleteResultMsg) (tea.Model, tea.Cmd) {
+	recordAudit(m.providerName, "vpsm server delete", "server", msg.server.ID, msg.server.Name, msg.err, m.actionStartTime)
+
 	if msg.err != nil {
 		// Show error, then return to list on any key.
 		m.actionLabel = ""
@@ -555,6 +561,13 @@ func (m serverAppModel) handleDeleteResult(msg deleteResultMsg) (tea.Model, tea.
 }
 
 func (m serverAppModel) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
+	var resourceID, resourceName string
+	if msg.server != nil {
+		resourceID = msg.server.ID
+		resourceName = msg.server.Name
+	}
+	recordAudit(m.providerName, "vpsm server create", "server", resourceID, resourceName, msg.err, m.actionStartTime)
+
 	if msg.err != nil {
 		m.actionLabel = ""
 		m.actionStatus = fmt.Sprintf("Error creating server: %v", msg.err)

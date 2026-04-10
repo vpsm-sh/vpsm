@@ -32,7 +32,8 @@ Examples:
 
   # JSON output for scripting
   vpsm server show --provider hetzner --id 12345 -o json`,
-		Run: runShow,
+		RunE:         runShow,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("id", "", "Server ID to show (skips interactive selection)")
@@ -41,13 +42,12 @@ Examples:
 	return cmd
 }
 
-func runShow(cmd *cobra.Command, args []string) {
+func runShow(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
@@ -59,23 +59,21 @@ func runShow(cmd *cobra.Command, args []string) {
 			if output == "" {
 				output = "table"
 			}
-			runListNonInteractive(cmd, provider, output)
-			return
+			return runListNonInteractive(cmd, provider, output)
 		}
 
 		// Interactive full-window TUI with seamless view transitions.
 		if _, err := tui.RunServerApp(provider, providerName); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+			return fmt.Errorf("server show failed: %w", err)
 		}
-		return
+		return nil
 	}
 
 	// Non-interactive mode: fetch and display directly.
 	ctx := context.Background()
 	server, err := provider.GetServer(ctx, serverID)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", err)
-		return
+		return fmt.Errorf("failed to fetch server: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -85,4 +83,6 @@ func runShow(cmd *cobra.Command, args []string) {
 	default:
 		printServerDetail(cmd, server)
 	}
+
+	return nil
 }
