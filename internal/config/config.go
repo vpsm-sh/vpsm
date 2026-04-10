@@ -31,6 +31,7 @@ func ResetPath() { pathOverride = "" }
 // Config holds user preferences that persist across invocations.
 type Config struct {
 	DefaultProvider string `json:"default_provider,omitempty"`
+	DNSProvider     string `json:"dns_provider,omitempty"`
 }
 
 // Path returns the absolute path to the config file.

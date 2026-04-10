@@ -9,9 +9,11 @@ import (
 	auditcmd "nathanbeddoewebdev/vpsm/cmd/commands/audit"
 	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
 	cfgcmd "nathanbeddoewebdev/vpsm/cmd/commands/config"
+	"nathanbeddoewebdev/vpsm/cmd/commands/dns"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/cmd/commands/sshkey"
 	"nathanbeddoewebdev/vpsm/internal/auditlog"
+	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
 	serverproviders "nathanbeddoewebdev/vpsm/internal/server/providers"
 	sshkeyproviders "nathanbeddoewebdev/vpsm/internal/sshkey/providers"
 
@@ -39,6 +41,7 @@ Quick start:
 	cmd.AddCommand(auth.NewCommand())
 	cmd.AddCommand(auditcmd.NewCommand())
 	cmd.AddCommand(cfgcmd.NewCommand())
+	cmd.AddCommand(dns.NewCommand())
 	cmd.AddCommand(server.NewCommand())
 	cmd.AddCommand(sshkey.NewCommand())
 
@@ -51,6 +54,8 @@ func Execute() {
 	serverproviders.RegisterHetzner()
 	sshkeyproviders.RegisterHetzner()
 	cobra.EnableTraverseRunHooks = true
+	dnsproviders.RegisterPorkbun()
+	dnsproviders.RegisterCloudflare()
 
 	var root = rootCmd()
 	root.SilenceUsage = true

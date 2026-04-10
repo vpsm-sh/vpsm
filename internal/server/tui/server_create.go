@@ -461,6 +461,12 @@ func (m serverCreateModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 		return m, nil
+	case "q":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
+		m.quitting = true
+		return m, tea.Quit
 	case "up", "k":
 		if cursor > 0 {
 			m.setListCursor(cursor - 1)
@@ -503,6 +509,12 @@ func (m serverCreateModel) handleSSHKeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	case "esc":
 		m.step = stepImage
 		return m, nil
+	case "q":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
+		m.quitting = true
+		return m, tea.Quit
 	case "up", "k":
 		if m.sshIdx > 0 {
 			m.sshIdx--
@@ -543,6 +555,12 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			m.step = stepImage
 		}
 		return m, nil
+	case "q":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
+		m.quitting = true
+		return m, tea.Quit
 	case "left", "h":
 		if m.confirmIdx > 0 {
 			m.confirmIdx--

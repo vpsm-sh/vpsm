@@ -321,7 +321,7 @@ func (m sshKeyAddModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m sshKeyAddModel) handleSourceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
+	case "esc", "q":
 		m.quitting = true
 		return m, tea.Quit
 	case "up", "k", "left", "h":
@@ -448,6 +448,9 @@ func (m sshKeyAddModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.step = sshStepName
 		return m, nil
+	case "q":
+		m.quitting = true
+		return m, tea.Quit
 	case "left", "h":
 		if m.confirmIdx > 0 {
 			m.confirmIdx--
