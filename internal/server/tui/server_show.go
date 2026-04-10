@@ -634,10 +634,7 @@ func (m serverShowModel) View() string {
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
 	statusH := lipgloss.Height(statusBar)
-	contentH := m.height - headerH - footerH - statusH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH-statusH, 1)
 
 	content := m.renderContent(contentH)
 
@@ -714,24 +711,15 @@ func (m serverShowModel) renderSelectPhase(height int) string {
 
 	title := styles.Title.Render("Select a server")
 
-	maxVisible := height - 4
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(height-4, 3)
 
 	// Scrolling.
-	start := m.listStart
-	if m.cursor < start {
-		start = m.cursor
-	}
+	start := min(m.cursor, m.listStart)
 	if m.cursor >= start+maxVisible {
 		start = m.cursor - maxVisible + 1
 	}
 
-	end := start + maxVisible
-	if end > len(m.servers) {
-		end = len(m.servers)
-	}
+	end := min(start+maxVisible, len(m.servers))
 
 	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
@@ -792,31 +780,21 @@ func (m serverShowModel) renderDetail() string {
 	const columnGap = 2
 
 	// Usable width after horizontal padding on both sides.
-	usableWidth := m.width - (hPad * 2)
-	if usableWidth < 60 {
-		usableWidth = 60
-	}
+	usableWidth := max(m.width-(hPad*2), 60)
 
 	// Left column: ~45% of width, giving room for long values.
-	leftWidth := usableWidth * 45 / 100
-	if leftWidth > 52 {
-		leftWidth = 52
-	}
+	leftWidth := min(usableWidth*45/100, 52)
 	if leftWidth < 34 {
 		leftWidth = 34
 	}
 
 	// Right column gets the rest. Needs enough room for Y-axis labels + chart.
-	rightWidth := usableWidth - leftWidth - columnGap
-	if rightWidth < 36 {
-		rightWidth = 36
-	}
+	rightWidth := max(usableWidth-leftWidth-columnGap, 36)
 
 	labelWidth := 14
-	valueWidth := leftWidth - labelWidth - 8 // padding + border
-	if valueWidth < 6 {
-		valueWidth = 6
-	}
+	valueWidth := max(
+		// padding + border
+		leftWidth-labelWidth-8, 6)
 
 	renderField := func(label, value string) string {
 		l := styles.Label.Width(labelWidth).Render(label)
@@ -915,10 +893,7 @@ func (m serverShowModel) renderMetricsSection(cardWidth int, sectionStyle lipglo
 
 	// Chart width = card inner content width.
 	// Card has Border(1 each side) + Padding(2 each side) = 6 horizontal overhead.
-	chartWidth := cardWidth - 6
-	if chartWidth < 20 {
-		chartWidth = 20
-	}
+	chartWidth := max(cardWidth-6, 20)
 
 	var charts []string
 

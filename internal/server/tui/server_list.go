@@ -30,8 +30,9 @@ type serverListModel struct {
 	provider     domain.Provider
 	providerName string
 
-	servers []domain.Server
-	cursor  int
+	servers   []domain.Server
+	cursor    int
+	listStart int // for scrolling
 
 	width  int
 	height int
@@ -205,6 +206,19 @@ func (m serverListModel) applyToggleOutcome(outcome *toggleOutcome, pollerCmd te
 	return m, nil
 }
 
+// updateScroll ensures the cursor is always visible within the listStart bounds.
+func (m *serverListModel) updateScroll() {
+	headerH, footerH, statusH := 3, 1, 1 // approximate
+	contentH := max(m.height-headerH-footerH-statusH, 1)
+	visibleRows := max(contentH-3, 1)
+
+	if m.cursor < m.listStart {
+		m.listStart = m.cursor
+	} else if m.cursor >= m.listStart+visibleRows {
+		m.listStart = m.cursor - visibleRows + 1
+	}
+}
+
 // --- Key handling ---
 
 func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -228,19 +242,23 @@ func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
+			m.updateScroll()
 		}
 
 	case "down", "j":
 		if m.cursor < len(m.servers)-1 {
 			m.cursor++
+			m.updateScroll()
 		}
 
 	case "g":
 		m.cursor = 0
+		m.updateScroll()
 
 	case "G":
 		if len(m.servers) > 0 {
 			m.cursor = len(m.servers) - 1
+			m.updateScroll()
 		}
 
 	case "enter":
@@ -354,10 +372,7 @@ func (m serverListModel) View() string {
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
 	statusH := lipgloss.Height(statusBar)
-	contentH := m.height - headerH - footerH - statusH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH-statusH, 1)
 
 	content := m.renderContent(contentH)
 
@@ -463,27 +478,17 @@ func (m serverListModel) renderTable(height int) string {
 	sep := styles.MutedText.Render(strings.Repeat("─", available))
 
 	// Render data rows.
-	visibleRows := height - 3 // header + sep + bottom padding
-	if visibleRows < 1 {
-		visibleRows = 1
-	}
+	visibleRows := max(
+		// header + sep + bottom padding
+		height-3, 1)
 
-	// Scrolling: keep cursor visible.
-	startIdx := 0
-	if m.cursor >= visibleRows {
-		startIdx = m.cursor - visibleRows + 1
-	}
-	endIdx := startIdx + visibleRows
+	endIdx := m.listStart + visibleRows
 	if endIdx > len(m.servers) {
 		endIdx = len(m.servers)
-		startIdx = endIdx - visibleRows
-		if startIdx < 0 {
-			startIdx = 0
-		}
 	}
 
 	rows := make([]string, 0, visibleRows)
-	for i := startIdx; i < endIdx; i++ {
+	for i := m.listStart; i < endIdx; i++ {
 		s := m.servers[i]
 		isSelected := i == m.cursor
 

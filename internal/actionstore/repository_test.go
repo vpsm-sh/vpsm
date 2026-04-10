@@ -156,7 +156,7 @@ func TestListPending(t *testing.T) {
 func TestListRecent(t *testing.T) {
 	r := tempRepo(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		record := &ActionRecord{
 			Provider:  "hetzner",
 			ServerID:  "42",
@@ -184,7 +184,7 @@ func TestListRecent(t *testing.T) {
 func TestListRecent_All(t *testing.T) {
 	r := tempRepo(t)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		r.Save(&ActionRecord{Provider: "hetzner", ServerID: "42", Status: "success"})
 	}
 

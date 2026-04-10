@@ -209,10 +209,7 @@ func MetricsChart(label string, data []float64, width int, suffix string) string
 		return styles.MutedText.Render(label + ": no data")
 	}
 
-	chartWidth := width
-	if chartWidth < 20 {
-		chartWidth = 20
-	}
+	chartWidth := max(width, 20)
 
 	lineStyle := lipgloss.NewStyle().Foreground(styles.Blue)
 	chart := newChart(chartWidth, chartHeight, data, suffix, lineStyle)
@@ -232,10 +229,7 @@ func MetricsDualChart(label string, series1, series2 []float64, legend1, legend2
 		return styles.MutedText.Render(label + ": no data")
 	}
 
-	chartWidth := width
-	if chartWidth < 20 {
-		chartWidth = 20
-	}
+	chartWidth := max(width, 20)
 
 	// Capture original emptiness before filling with zeros for chart rendering.
 	orig1Empty := len(series1) == 0

@@ -19,5 +19,5 @@ type Server struct {
 
 	// Metadata holds provider-specific fields
 	// Examples: floating_ips, firewalls, volumes, tags, etc.
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }

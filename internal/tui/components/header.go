@@ -36,10 +36,7 @@ func Header(width int, breadcrumb string, provider string) string {
 	leftLen := lipgloss.Width(left)
 	rightLen := lipgloss.Width(right)
 	innerWidth := width - 4 // account for padding
-	gap := innerWidth - leftLen - rightLen
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(innerWidth-leftLen-rightLen, 1)
 
 	content := left + strings.Repeat(" ", gap) + right
 

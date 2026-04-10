@@ -33,10 +33,7 @@ func (h *HetznerProvider) GetServerMetrics(ctx context.Context, serverID string,
 
 	// Calculate step to produce ~60 data points.
 	duration := end.Sub(start)
-	step := int(duration.Seconds() / 60)
-	if step < 1 {
-		step = 1
-	}
+	step := max(int(duration.Seconds()/60), 1)
 
 	opts := hcloud.ServerGetMetricsOpts{
 		Types: hcloudTypes,

@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
@@ -93,10 +94,7 @@ func (m authStatusModel) View() string {
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH, 1)
 
 	content := m.renderContent(contentH)
 
@@ -132,15 +130,15 @@ func (m authStatusModel) renderContent(height int) string {
 		rows = append(rows, name+statusText)
 	}
 
-	content := ""
+	var content strings.Builder
 	for i, row := range rows {
-		content += row
+		content.WriteString(row)
 		if i < len(rows)-1 {
-			content += "\n"
+			content.WriteString("\n")
 		}
 	}
 
-	card := styles.Card.Width(cardWidth).Render(content)
+	card := styles.Card.Width(cardWidth).Render(content.String())
 
 	combined := lipgloss.JoinVertical(lipgloss.Center, title, "", card)
 

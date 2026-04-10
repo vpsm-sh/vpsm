@@ -1,0 +1,20 @@
+--- internal/dns/providers/porkbun.go
++++ internal/dns/providers/porkbun.go
+@@ -257,7 +257,7 @@
+ 
+ 	type response struct {
+ 		porkbunResponse
+-		ID string `json:"id"`
++		ID int `json:"id"`
+ 	}
+ 
+ 	body := request{
+@@ -283,7 +283,7 @@
+ 	}
+ 
+ 	// Fetch the newly created record so we can return a fully-populated struct.
+-	return p.GetRecord(ctx, domainName, out.ID)
++	return p.GetRecord(ctx, domainName, fmt.Sprintf("%d", out.ID))
+ }
+ 
+ // UpdateRecord updates an existing DNS record by its ID.

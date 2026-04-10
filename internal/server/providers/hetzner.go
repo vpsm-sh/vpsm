@@ -242,7 +242,7 @@ func toDomainServer(s *hcloud.Server) domain.Server {
 		Status:    string(s.Status),
 		CreatedAt: s.Created,
 		Provider:  "hetzner",
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 
 	if !s.PublicNet.IPv4.IsUnspecified() {

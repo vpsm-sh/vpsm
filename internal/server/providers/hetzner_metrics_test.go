@@ -17,20 +17,20 @@ import (
 // testMetricsResponse builds a Hetzner API metrics response with the given
 // time series data. Keys follow the Hetzner API naming (e.g. "cpu",
 // "disk.0.iops.read", "network.0.bandwidth.in").
-func testMetricsResponse(start, end string, step float64, timeSeries map[string][][2]interface{}) map[string]interface{} {
-	ts := make(map[string]interface{}, len(timeSeries))
+func testMetricsResponse(start, end string, step float64, timeSeries map[string][][2]any) map[string]any {
+	ts := make(map[string]any, len(timeSeries))
 	for name, points := range timeSeries {
-		values := make([]interface{}, len(points))
+		values := make([]any, len(points))
 		for i, pt := range points {
-			values[i] = []interface{}{pt[0], pt[1]}
+			values[i] = []any{pt[0], pt[1]}
 		}
-		ts[name] = map[string]interface{}{
+		ts[name] = map[string]any{
 			"values": values,
 		}
 	}
 
-	return map[string]interface{}{
-		"metrics": map[string]interface{}{
+	return map[string]any{
+		"metrics": map[string]any{
 			"start":       start,
 			"end":         end,
 			"step":        step,
@@ -44,7 +44,7 @@ func TestGetServerMetrics_HappyPath(t *testing.T) {
 		"2024-01-15T12:00:00Z",
 		"2024-01-15T13:00:00Z",
 		60,
-		map[string][][2]interface{}{
+		map[string][][2]any{
 			"cpu": {
 				{1705320000.0, "42.5"},
 				{1705320060.0, "55.3"},
@@ -161,7 +161,7 @@ func TestGetServerMetrics_HappyPath(t *testing.T) {
 }
 
 func TestGetServerMetrics_InvalidID(t *testing.T) {
-	srv := newTestAPI(t, map[string]interface{}{})
+	srv := newTestAPI(t, map[string]any{})
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	_, err := provider.GetServerMetrics(
@@ -183,8 +183,8 @@ func TestGetServerMetrics_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "not_found",
 				"message": "server not found",
 			},
@@ -213,8 +213,8 @@ func TestGetServerMetrics_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "unauthorized",
 				"message": "unable to authenticate",
 			},
@@ -244,7 +244,7 @@ func TestGetServerMetrics_EmptySeries(t *testing.T) {
 		"2024-01-15T12:00:00Z",
 		"2024-01-15T13:00:00Z",
 		60,
-		map[string][][2]interface{}{
+		map[string][][2]any{
 			"cpu": {},
 		},
 	)

@@ -793,10 +793,7 @@ func (m serverAppModel) renderAction() string {
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH, 1)
 
 	var content string
 	if m.actionStatus != "" {

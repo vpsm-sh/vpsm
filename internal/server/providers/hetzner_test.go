@@ -36,7 +36,7 @@ func newTestHetznerProvider(t *testing.T, serverURL string, token string) *Hetzn
 
 // newTestAPI spins up an httptest.Server that returns the given response as JSON.
 // The server is automatically closed when the test finishes.
-func newTestAPI(t *testing.T, response interface{}) *httptest.Server {
+func newTestAPI(t *testing.T, response any) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -51,8 +51,8 @@ func newTestAPI(t *testing.T, response interface{}) *httptest.Server {
 // --- JSON builder helpers for Hetzner API-shaped responses ---
 
 // testLocationJSON builds a Hetzner API location object.
-func testLocationJSON(id int, name, country, city string) map[string]interface{} {
-	return map[string]interface{}{
+func testLocationJSON(id int, name, country, city string) map[string]any {
+	return map[string]any{
 		"id": id, "name": name, "description": name,
 		"country": country, "city": city,
 		"latitude": 50.0, "longitude": 12.0,
@@ -61,22 +61,22 @@ func testLocationJSON(id int, name, country, city string) map[string]interface{}
 }
 
 // testServerTypeJSON builds a Hetzner API server_type object.
-func testServerTypeJSON(id int, name, arch string) map[string]interface{} {
-	return map[string]interface{}{
+func testServerTypeJSON(id int, name, arch string) map[string]any {
+	return map[string]any{
 		"id": id, "name": name, "description": name,
 		"cores": 2, "memory": 2.0, "disk": 40,
 		"architecture": arch,
 		"storage_type": "local",
 		"cpu_type":     "shared",
-		"prices":       []interface{}{},
-		"locations":    []interface{}{},
+		"prices":       []any{},
+		"locations":    []any{},
 	}
 }
 
 // testServerTypeLocationJSON builds a Hetzner API server_type location entry,
 // optionally with deprecation info.
-func testServerTypeLocationJSON(id int, name string, deprecation map[string]interface{}) map[string]interface{} {
-	loc := map[string]interface{}{
+func testServerTypeLocationJSON(id int, name string, deprecation map[string]any) map[string]any {
+	loc := map[string]any{
 		"id":   id,
 		"name": name,
 	}
@@ -87,8 +87,8 @@ func testServerTypeLocationJSON(id int, name string, deprecation map[string]inte
 }
 
 // testImageJSON builds a Hetzner API image object.
-func testImageJSON(id int, name, osFlavor, osVersion, arch string) map[string]interface{} {
-	return map[string]interface{}{
+func testImageJSON(id int, name, osFlavor, osVersion, arch string) map[string]any {
+	return map[string]any{
 		"id": id, "name": name, "description": name,
 		"type": "system", "status": "available",
 		"os_flavor": osFlavor, "os_version": osVersion,
@@ -98,23 +98,23 @@ func testImageJSON(id int, name, osFlavor, osVersion, arch string) map[string]in
 
 // testServerJSON builds a minimal Hetzner API server object with sensible defaults.
 // The returned map can be modified before being used in a response.
-func testServerJSON(id int, name, status, created string, loc map[string]interface{}, st map[string]interface{}) map[string]interface{} {
-	return map[string]interface{}{
+func testServerJSON(id int, name, status, created string, loc map[string]any, st map[string]any) map[string]any {
+	return map[string]any{
 		"id":      id,
 		"name":    name,
 		"status":  status,
 		"created": created,
-		"public_net": map[string]interface{}{
-			"floating_ips": []interface{}{},
-			"firewalls":    []interface{}{},
+		"public_net": map[string]any{
+			"floating_ips": []any{},
+			"firewalls":    []any{},
 		},
-		"private_net":    []interface{}{},
+		"private_net":    []any{},
 		"server_type":    st,
 		"image":          nil,
 		"location":       loc,
-		"labels":         map[string]interface{}{},
-		"volumes":        []interface{}{},
-		"load_balancers": []interface{}{},
+		"labels":         map[string]any{},
+		"volumes":        []any{},
+		"load_balancers": []any{},
 	}
 }
 
@@ -130,27 +130,27 @@ func TestListServers_HappyPath(t *testing.T) {
 	nbg1 := testLocationJSON(2, "nbg1", "DE", "Nuremberg")
 
 	server1 := testServerJSON(42, "web-server", "running", createdStr, fsn1, testServerTypeJSON(1, "cpx11", "x86"))
-	server1["public_net"] = map[string]interface{}{
-		"ipv4":         map[string]interface{}{"ip": "1.2.3.4", "blocked": false},
-		"ipv6":         map[string]interface{}{"ip": "2001:db8::/64", "blocked": false},
-		"floating_ips": []interface{}{},
-		"firewalls":    []interface{}{},
+	server1["public_net"] = map[string]any{
+		"ipv4":         map[string]any{"ip": "1.2.3.4", "blocked": false},
+		"ipv6":         map[string]any{"ip": "2001:db8::/64", "blocked": false},
+		"floating_ips": []any{},
+		"firewalls":    []any{},
 	}
-	server1["private_net"] = []interface{}{
-		map[string]interface{}{"ip": "10.0.0.2", "alias_ips": []interface{}{}, "network": 1, "mac_address": ""},
+	server1["private_net"] = []any{
+		map[string]any{"ip": "10.0.0.2", "alias_ips": []any{}, "network": 1, "mac_address": ""},
 	}
 	server1["image"] = testImageJSON(1, "ubuntu-24.04", "ubuntu", "24.04", "x86")
 
 	server2 := testServerJSON(99, "db-server", "stopped", createdStr, nbg1, testServerTypeJSON(2, "cpx22", "arm"))
-	server2["public_net"] = map[string]interface{}{
-		"ipv4":         map[string]interface{}{"ip": "5.6.7.8", "blocked": false},
-		"floating_ips": []interface{}{},
-		"firewalls":    []interface{}{},
+	server2["public_net"] = map[string]any{
+		"ipv4":         map[string]any{"ip": "5.6.7.8", "blocked": false},
+		"floating_ips": []any{},
+		"firewalls":    []any{},
 	}
 	server2["image"] = testImageJSON(2, "debian-12", "debian", "12", "x86")
 
-	response := map[string]interface{}{
-		"servers": []interface{}{server1, server2},
+	response := map[string]any{
+		"servers": []any{server1, server2},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +189,7 @@ func TestListServers_HappyPath(t *testing.T) {
 		ServerType:  "cpx11",
 		Image:       "ubuntu-24.04",
 		Provider:    "hetzner",
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"hetzner_id":   int64(42),
 			"architecture": "x86",
 		},
@@ -205,7 +205,7 @@ func TestListServers_HappyPath(t *testing.T) {
 		ServerType: "cpx22",
 		Image:      "debian-12",
 		Provider:   "hetzner",
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"hetzner_id":   int64(99),
 			"architecture": "arm",
 		},
@@ -220,8 +220,8 @@ func TestListServers_HappyPath(t *testing.T) {
 }
 
 func TestListServers_EmptyList(t *testing.T) {
-	srv := newTestAPI(t, map[string]interface{}{
-		"servers": []interface{}{},
+	srv := newTestAPI(t, map[string]any{
+		"servers": []any{},
 	})
 
 	ctx := context.Background()
@@ -247,16 +247,16 @@ func TestListServers_RetriesOnTransientError(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if callCount == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{
 					"code":    "service_error",
 					"message": "temporary error",
 				},
 			})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"servers": []interface{}{server},
+		json.NewEncoder(w).Encode(map[string]any{
+			"servers": []any{server},
 		})
 	}))
 	t.Cleanup(srv.Close)
@@ -282,8 +282,8 @@ func TestListServers_NilOptionalFields(t *testing.T) {
 	// image is already nil from testServerJSON
 	// public_net has no ipv4/ipv6 entries, private_net is empty
 
-	srv := newTestAPI(t, map[string]interface{}{
-		"servers": []interface{}{server},
+	srv := newTestAPI(t, map[string]any{
+		"servers": []any{server},
 	})
 
 	ctx := context.Background()
@@ -315,8 +315,8 @@ func TestListServers_Non200StatusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "unauthorized",
 				"message": "unable to authenticate",
 			},
@@ -352,8 +352,8 @@ func TestListServers_FactoryViaRegistry(t *testing.T) {
 
 	server := testServerJSON(7, "registry-server", "running", "2024-06-15T12:00:00+00:00", loc, testServerTypeJSON(3, "cpx31", "x86"))
 
-	response := map[string]interface{}{
-		"servers": []interface{}{server},
+	response := map[string]any{
+		"servers": []any{server},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -432,11 +432,11 @@ func TestGetServer_HappyPath(t *testing.T) {
 	fsn1 := testLocationJSON(1, "fsn1", "DE", "Falkenstein")
 
 	server := testServerJSON(42, "web-server", "running", createdStr, fsn1, testServerTypeJSON(1, "cpx11", "x86"))
-	server["public_net"] = map[string]interface{}{
-		"ipv4":         map[string]interface{}{"ip": "1.2.3.4", "blocked": false},
-		"ipv6":         map[string]interface{}{"ip": "2001:db8::/64", "blocked": false},
-		"floating_ips": []interface{}{},
-		"firewalls":    []interface{}{},
+	server["public_net"] = map[string]any{
+		"ipv4":         map[string]any{"ip": "1.2.3.4", "blocked": false},
+		"ipv6":         map[string]any{"ip": "2001:db8::/64", "blocked": false},
+		"floating_ips": []any{},
+		"firewalls":    []any{},
 	}
 	server["image"] = testImageJSON(1, "ubuntu-24.04", "ubuntu", "24.04", "x86")
 
@@ -449,7 +449,7 @@ func TestGetServer_HappyPath(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"server": server,
 		})
 	}))
@@ -473,7 +473,7 @@ func TestGetServer_HappyPath(t *testing.T) {
 		ServerType: "cpx11",
 		Image:      "ubuntu-24.04",
 		Provider:   "hetzner",
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"hetzner_id":   int64(42),
 			"architecture": "x86",
 		},
@@ -500,8 +500,8 @@ func TestGetServer_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "not_found",
 				"message": "server with ID '999' not found",
 			},
@@ -524,8 +524,8 @@ func TestGetServer_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "unauthorized",
 				"message": "unable to authenticate",
 			},
@@ -559,14 +559,14 @@ func TestDeleteServer_HappyPath(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"action": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"action": map[string]any{
 				"id":       1,
 				"status":   "running",
 				"command":  "delete_server",
 				"progress": 0,
-				"resources": []interface{}{
-					map[string]interface{}{"id": 42, "type": "server"},
+				"resources": []any{
+					map[string]any{"id": 42, "type": "server"},
 				},
 			},
 		})
@@ -597,8 +597,8 @@ func TestDeleteServer_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "not_found",
 				"message": "server with ID '999' not found",
 			},
@@ -618,8 +618,8 @@ func TestDeleteServer_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "server_error",
 				"message": "internal server error",
 			},

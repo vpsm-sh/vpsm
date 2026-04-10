@@ -18,5 +18,5 @@ type CreateServerOpts struct {
 
 	// Provider-specific extensions (e.g. firewalls, networks, volumes).
 	// Keyed by provider-defined strings; see each provider for details.
-	Extra map[string]interface{}
+	Extra map[string]any
 }

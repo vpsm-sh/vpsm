@@ -285,10 +285,7 @@ func (m sshKeyAddModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		available := msg.Width - 10
-		if available < 20 {
-			available = 20
-		}
+		available := max(msg.Width-10, 20)
 		m.pathInput.Width = minInt(60, available)
 		m.keyInput.Width = minInt(70, available)
 		m.nameInput.Width = minInt(40, available)
@@ -324,7 +321,7 @@ func (m sshKeyAddModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m sshKeyAddModel) handleSourceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
+	case "esc", "q":
 		m.quitting = true
 		return m, tea.Quit
 	case "up", "k", "left", "h":
@@ -451,6 +448,9 @@ func (m sshKeyAddModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.step = sshStepName
 		return m, nil
+	case "q":
+		m.quitting = true
+		return m, tea.Quit
 	case "left", "h":
 		if m.confirmIdx > 0 {
 			m.confirmIdx--
@@ -514,10 +514,7 @@ func (m sshKeyAddModel) View() string {
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH, 1)
 
 	content := m.renderContent(contentH)
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)

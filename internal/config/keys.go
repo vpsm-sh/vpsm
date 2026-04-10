@@ -30,6 +30,12 @@ var Keys = []KeySpec{
 		Get:         func(cfg *Config) string { return cfg.DefaultProvider },
 		Set:         func(cfg *Config, v string) { cfg.DefaultProvider = v },
 	},
+	{
+		Name:        "dns-provider",
+		Description: "DNS provider used when --provider is not specified for DNS commands",
+		Get:         func(cfg *Config) string { return cfg.DNSProvider },
+		Set:         func(cfg *Config, v string) { cfg.DNSProvider = v },
+	},
 }
 
 // Lookup returns the KeySpec for the given name, or nil if not found.

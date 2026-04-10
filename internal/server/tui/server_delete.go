@@ -292,10 +292,7 @@ func (m serverDeleteModel) View() string {
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH, 1)
 
 	content := m.renderContent(contentH)
 
@@ -343,24 +340,15 @@ func (m serverDeleteModel) renderSelectPhase(height int) string {
 
 	title := styles.Title.Render("Select a server to delete")
 
-	maxVisible := height - 4
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := max(height-4, 3)
 
 	// Scrolling.
-	start := m.listStart
-	if m.cursor < start {
-		start = m.cursor
-	}
+	start := min(m.cursor, m.listStart)
 	if m.cursor >= start+maxVisible {
 		start = m.cursor - maxVisible + 1
 	}
 
-	end := start + maxVisible
-	if end > len(m.servers) {
-		end = len(m.servers)
-	}
+	end := min(start+maxVisible, len(m.servers))
 
 	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {

@@ -55,10 +55,7 @@ func ShowServerForm(provider domain.Provider) (*domain.Server, error) {
 	var selectedID string
 	serverOpts := buildServerOptions(servers)
 
-	height := len(serverOpts)
-	if height < 5 {
-		height = 5
-	}
+	height := max(len(serverOpts), 5)
 	if height > 12 {
 		height = 12
 	}

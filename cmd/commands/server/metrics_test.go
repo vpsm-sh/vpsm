@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -219,13 +220,7 @@ func TestMetricsCommand_RequestsAllMetricTypes(t *testing.T) {
 		t.Errorf("expected %d metric types, got %d", len(expectedTypes), len(mock.gotTypes))
 	}
 	for _, want := range expectedTypes {
-		found := false
-		for _, got := range mock.gotTypes {
-			if got == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(mock.gotTypes, want)
 		if !found {
 			t.Errorf("expected metric type %q in request", want)
 		}

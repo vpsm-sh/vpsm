@@ -1,0 +1,947 @@
+diff --git a/internal/dns/providers/porkbun.go b/internal/dns/providers/porkbun.go
+index a74f8b6..b3487ad 100644
+--- a/internal/dns/providers/porkbun.go
++++ b/internal/dns/providers/porkbun.go
+@@ -257,7 +257,7 @@ func (p *PorkbunProvider) CreateRecord(ctx context.Context, domainName string, o
+ 
+ 	type response struct {
+ 		porkbunResponse
+-		ID string `json:"id"`
++		ID int `json:"id"`
+ 	}
+ 
+ 	body := request{
+@@ -283,7 +283,7 @@ func (p *PorkbunProvider) CreateRecord(ctx context.Context, domainName string, o
+ 	}
+ 
+ 	// Fetch the newly created record so we can return a fully-populated struct.
+-	return p.GetRecord(ctx, domainName, out.ID)
++	return p.GetRecord(ctx, domainName, fmt.Sprintf("%d", out.ID))
+ }
+ 
+ // UpdateRecord updates an existing DNS record by its ID.
+diff --git a/internal/dns/providers/porkbun_test.go b/internal/dns/providers/porkbun_test.go
+index 7d4e506..159063e 100644
+--- a/internal/dns/providers/porkbun_test.go
++++ b/internal/dns/providers/porkbun_test.go
+@@ -239,7 +239,7 @@ func TestCreateRecord_HappyPath(t *testing.T) {
+ 		var body any
+ 		if callCount == 1 {
+ 			// POST /dns/create/example.com
+-			body = porkbunSuccess(map[string]any{"id": "201"})
++			body = porkbunSuccess(map[string]any{"id": 201})
+ 		} else {
+ 			// POST /dns/retrieve/example.com/201
+ 			body = porkbunSuccess(map[string]any{
+diff --git a/internal/tui/dns_domain_list.go b/internal/tui/dns_domain_list.go
+index 03b345d..de03bde 100644
+--- a/internal/tui/dns_domain_list.go
++++ b/internal/tui/dns_domain_list.go
+@@ -3,6 +3,7 @@ package tui
+ import (
+ 	"context"
+ 	"fmt"
++	"strings"
+ 
+ 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
+ 	"nathanbeddoewebdev/vpsm/internal/dns/services"
+@@ -30,8 +31,9 @@ type dnsDomainListModel struct {
+ 	service      *services.Service
+ 	providerName string
+ 
+-	domains []domain.Domain
+-	cursor  int
++	domains   []domain.Domain
++	cursor    int
++	listStart int // for scrolling
+ 
+ 	width  int
+ 	height int
+@@ -75,6 +77,18 @@ func (m dnsDomainListModel) loadDomainsCmd() tea.Cmd {
+ 	}
+ }
+ 
++func (m *dnsDomainListModel) updateScroll() {
++	headerH, footerH, statusH := 3, 1, 1 // approximate
++	contentH := max(m.height-headerH-footerH-statusH, 1)
++	visibleRows := max(contentH-3, 1)
++
++	if m.cursor < m.listStart {
++		m.listStart = m.cursor
++	} else if m.cursor >= m.listStart+visibleRows {
++		m.listStart = m.cursor - visibleRows + 1
++	}
++}
++
+ func (m dnsDomainListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 	var cmds []tea.Cmd
+ 
+@@ -84,8 +98,17 @@ func (m dnsDomainListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 		m.height = msg.Height
+ 
+ 	case tea.KeyMsg:
++		if m.loading {
++			if msg.String() == "ctrl+c" {
++				if !m.embedded {
++					return m, tea.Quit
++				}
++			}
++			return m, nil
++		}
++
+ 		switch msg.String() {
+-		case "q":
++		case "ctrl+c", "q", "esc":
+ 			if !m.embedded {
+ 				return m, tea.Quit
+ 			}
+@@ -93,10 +116,20 @@ func (m dnsDomainListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 			if m.cursor > 0 {
+ 				m.cursor--
+ 			}
++			m.updateScroll()
+ 		case "down", "j":
+ 			if m.cursor < len(m.domains)-1 {
+ 				m.cursor++
+ 			}
++			m.updateScroll()
++		case "g":
++			m.cursor = 0
++			m.updateScroll()
++		case "G":
++			if len(m.domains) > 0 {
++				m.cursor = len(m.domains) - 1
++			}
++			m.updateScroll()
+ 		case "r":
+ 			m.loading = true
+ 			m.err = nil
+@@ -118,7 +151,7 @@ func (m dnsDomainListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 		if len(m.domains) == 0 {
+ 			m.status = "No domains found."
+ 		} else {
+-			m.status = fmt.Sprintf("Loaded %d domains.", len(m.domains))
++			m.status = fmt.Sprintf("%d domain(s)", len(m.domains))
+ 		}
+ 
+ 	case dnsDomainsErrorMsg:
+@@ -139,101 +172,168 @@ func (m dnsDomainListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ }
+ 
+ func (m dnsDomainListModel) View() string {
++	if m.width == 0 || m.height == 0 {
++		return ""
++	}
++
+ 	header := components.Header(m.width, "dns > domains", m.providerName)
+ 
+-	bindings := []components.KeyBinding{
+-		{Key: "j/k", Desc: "navigate"},
+-		{Key: "enter", Desc: "records"},
+-		{Key: "r", Desc: "refresh"},
+-	}
+-	if !m.embedded {
+-		bindings = append(bindings, components.KeyBinding{Key: "q", Desc: "quit"})
++	var footerBindings []components.KeyBinding
++	if m.loading {
++		footerBindings = []components.KeyBinding{
++			{Key: "ctrl+c", Desc: "quit"},
++		}
++	} else {
++		footerBindings = []components.KeyBinding{
++			{Key: "j/k", Desc: "navigate"},
++			{Key: "enter", Desc: "records"},
++			{Key: "r", Desc: "refresh"},
++		}
++		if !m.embedded {
++			footerBindings = append(footerBindings, components.KeyBinding{Key: "q", Desc: "quit"})
++		}
+ 	}
+-	footer := components.Footer(m.width, bindings)
++	footer := components.Footer(m.width, footerBindings)
+ 
+-	statusBar := components.StatusBar(m.width, m.status, m.statusIsError)
++	statusBar := ""
++	if m.err != nil {
++		statusBar = components.StatusBar(m.width, "Error: "+m.err.Error(), true)
++	} else if m.status != "" {
++		statusBar = components.StatusBar(m.width, m.status, m.statusIsError)
++	}
+ 
+ 	headerH := lipgloss.Height(header)
+ 	footerH := lipgloss.Height(footer)
+ 	statusH := lipgloss.Height(statusBar)
+-	contentH := m.height - headerH - footerH - statusH
+-	if contentH < 1 {
+-		contentH = 1
++	contentH := max(m.height-headerH-footerH-statusH, 1)
++
++	content := m.renderContent(contentH)
++
++	sections := []string{header, content}
++	if statusBar != "" {
++		sections = append(sections, statusBar)
+ 	}
++	sections = append(sections, footer)
++
++	return lipgloss.JoinVertical(lipgloss.Left, sections...)
++}
+ 
+-	var content string
++func (m dnsDomainListModel) renderContent(height int) string {
+ 	if m.loading {
+-		content = fmt.Sprintf("\n  %s Loading domains...", m.spinner.View())
+-	} else if m.err != nil {
+-		content = fmt.Sprintf("\n  %s", styles.ErrorText.Render(m.err.Error()))
+-	} else if len(m.domains) == 0 {
+-		content = "\n  No domains found in this account."
+-	} else {
+-		content = m.renderTable(contentH)
++		loadingText := m.spinner.View() + "  Fetching domains…"
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Center,
++			styles.MutedText.Render(loadingText),
++		)
++	}
++
++	if m.err != nil {
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Center,
++			styles.ErrorText.Render(fmt.Sprintf("Error: %v", m.err)),
++		)
+ 	}
+ 
+-	// Pad content to fill height
+-	lines := lipgloss.Height(content)
+-	if lines < contentH {
+-		content += lipgloss.NewStyle().Height(contentH - lines).Render("")
++	if len(m.domains) == 0 {
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Center,
++			styles.MutedText.Render("No domains found."),
++		)
+ 	}
+ 
+-	return lipgloss.JoinVertical(lipgloss.Left, header, content, statusBar, footer)
++	return m.renderTable(height)
+ }
+ 
+ func (m dnsDomainListModel) renderTable(height int) string {
+-	if len(m.domains) == 0 {
+-		return ""
++	type column struct {
++		title string
++		width int
+ 	}
+ 
+-	cols := []int{30, 15, 10, 20}
++	available := m.width - 4
+ 
+-	header := styles.TableHeader.Render(
+-		fmt.Sprintf("  %-*s %-*s %-*s %-*s",
+-			cols[0], "DOMAIN",
+-			cols[1], "STATUS",
+-			cols[2], "TLD",
+-			cols[3], "EXPIRES",
+-		),
+-	)
++	cols := []column{
++		{title: "DOMAIN", width: 30},
++		{title: "STATUS", width: 12},
++		{title: "TLD", width: 10},
++		{title: "EXPIRES", width: 20},
++	}
+ 
+-	var rows []string
+-	rows = append(rows, header)
++	total := 0
++	for _, c := range cols {
++		total += c.width
++	}
++	if available > total {
++		extra := available - total
++		for i := range cols {
++			if cols[i].title == "DOMAIN" {
++				cols[i].width += extra
++				break
++			}
++		}
++	}
+ 
+-	// Simple pagination/viewport calculation
+-	start := 0
+-	if m.cursor >= height-2 {
+-		start = m.cursor - (height - 3)
++	headerCells := make([]string, len(cols))
++	for i, col := range cols {
++		headerCells[i] = styles.TableHeader.
++			Width(col.width).
++			Render(col.title)
+ 	}
+-	end := start + height - 2
++	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, headerCells...)
++
++	sep := styles.MutedText.Render(strings.Repeat("─", available))
++
++	visibleRows := max(height-3, 1) // header + sep + padding
++
++	end := m.listStart + visibleRows
+ 	if end > len(m.domains) {
+ 		end = len(m.domains)
+ 	}
+ 
+-	for i := start; i < end; i++ {
++	var rows []string
++	rows = append(rows, headerRow, sep)
++
++	for i := m.listStart; i < end; i++ {
+ 		d := m.domains[i]
+ 
+-		cursor := " "
++		status := d.Status
++		if status == "ACTIVE" || status == "active" {
++			status = styles.SuccessText.Render(status)
++		} else {
++			status = styles.MutedText.Render(status)
++		}
++
++		cells := []string{
++			lipgloss.NewStyle().Width(cols[0].width).Render(d.Name),
++			lipgloss.NewStyle().Width(cols[1].width).Render(status),
++			lipgloss.NewStyle().Width(cols[2].width).Render(d.TLD),
++			lipgloss.NewStyle().Width(cols[3].width).Render(d.ExpireDate),
++		}
++
++		rowContent := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
++
++		cursor := "  "
+ 		rowStyle := styles.TableCell
+ 		if i == m.cursor {
+-			cursor = styles.AccentText.Render(">")
++			cursor = styles.AccentText.Render("> ")
+ 			rowStyle = styles.TableSelectedRow
+ 		}
+ 
+-		status := d.Status
+-		if status == "ACTIVE" {
+-			status = styles.SuccessText.Render(status)
+-		}
++		renderedRow := lipgloss.JoinHorizontal(lipgloss.Top, cursor, rowStyle.Render(rowContent))
++		rows = append(rows, renderedRow)
++	}
+ 
+-		row := fmt.Sprintf("%s %-*s %-*s %-*s %-*s",
+-			cursor,
+-			cols[0], d.Name,
+-			cols[1], status,
+-			cols[2], d.TLD,
+-			cols[3], d.ExpireDate,
+-		)
+-		rows = append(rows, rowStyle.Render(row))
++	table := lipgloss.JoinVertical(lipgloss.Left, rows...)
++
++	// Pad content to fill available height to push footer down
++	contentLines := strings.Split(table, "\n")
++	if len(contentLines) < height {
++		padding := strings.Repeat("\n", height-len(contentLines))
++		table += padding
+ 	}
+ 
+-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
++	return table
+ }
+diff --git a/internal/tui/dns_record_create.go b/internal/tui/dns_record_create.go
+index 9cd312f..0ae8066 100644
+--- a/internal/tui/dns_record_create.go
++++ b/internal/tui/dns_record_create.go
+@@ -56,12 +56,14 @@ func newDNSRecordCreateModel(svc *services.Service, providerName, domainName str
+ 	nameIn := textinput.New()
+ 	nameIn.Placeholder = "e.g. www (leave empty for root)"
+ 	nameIn.SetValue(prefill.Name)
++	nameIn.Width = 40
+ 	inputs[dnsCreateStepName] = nameIn
+ 
+ 	// Content input
+ 	contentIn := textinput.New()
+ 	contentIn.Placeholder = "e.g. 1.2.3.4"
+ 	contentIn.SetValue(prefill.Content)
++	contentIn.Width = 40
+ 	inputs[dnsCreateStepContent] = contentIn
+ 
+ 	// TTL input
+@@ -70,6 +72,7 @@ func newDNSRecordCreateModel(svc *services.Service, providerName, domainName str
+ 	if prefill.TTL > 0 {
+ 		ttlIn.SetValue(strconv.Itoa(prefill.TTL))
+ 	}
++	ttlIn.Width = 40
+ 	inputs[dnsCreateStepTTL] = ttlIn
+ 
+ 	// Priority input
+@@ -78,12 +81,14 @@ func newDNSRecordCreateModel(svc *services.Service, providerName, domainName str
+ 	if prefill.Priority > 0 {
+ 		prioIn.SetValue(strconv.Itoa(prefill.Priority))
+ 	}
++	prioIn.Width = 40
+ 	inputs[dnsCreateStepPriority] = prioIn
+ 
+ 	// Notes input
+ 	notesIn := textinput.New()
+ 	notesIn.Placeholder = "Optional notes"
+ 	notesIn.SetValue(prefill.Notes)
++	notesIn.Width = 40
+ 	inputs[dnsCreateStepNotes] = notesIn
+ 
+ 	// Preset the opts type
+@@ -145,6 +150,13 @@ func (m dnsRecordCreateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 			return m, tea.Quit
+ 		case "ctrl+c":
+ 			return m, tea.Quit
++		case "q":
++			if m.step == dnsCreateStepType || m.step == dnsCreateStepConfirm {
++				if m.embedded {
++					return m, func() tea.Msg { return dnsNavigateBackMsg{} }
++				}
++				return m, tea.Quit
++			}
+ 		case "up", "k":
+ 			if m.step == dnsCreateStepType && m.cursor > 0 {
+ 				m.cursor--
+@@ -385,12 +397,6 @@ func (m dnsRecordCreateModel) renderInputStep(title string) string {
+ 	in.TextStyle = styles.Value
+ 	in.PlaceholderStyle = styles.MutedText
+ 
+-	if in.Focused() {
+-		// Draw a border around it
+-		view := in.View()
+-		box := styles.CardActive.Render(view)
+-		return fmt.Sprintf("  %s\n\n%s", styles.Subtitle.Render(title+":"), "  "+box)
+-	}
+ 	return fmt.Sprintf("  %s\n\n  %s", styles.Subtitle.Render(title+":"), in.View())
+ }
+ 
+diff --git a/internal/tui/dns_record_edit.go b/internal/tui/dns_record_edit.go
+index 5a6cf91..ae8c314 100644
+--- a/internal/tui/dns_record_edit.go
++++ b/internal/tui/dns_record_edit.go
+@@ -119,6 +119,13 @@ func (m dnsRecordEditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 			return m, tea.Quit
+ 		case "ctrl+c":
+ 			return m, tea.Quit
++		case "q":
++			if m.step == dnsCreateStepConfirm {
++				if m.embedded {
++					return m, func() tea.Msg { return dnsNavigateBackMsg{} }
++				}
++				return m, tea.Quit
++			}
+ 		case "enter":
+ 			// Process current step
+ 			switch m.step {
+@@ -278,11 +285,6 @@ func (m dnsRecordEditModel) renderInputStep(title string) string {
+ 	in.TextStyle = styles.Value
+ 	in.PlaceholderStyle = styles.MutedText
+ 
+-	if in.Focused() {
+-		view := in.View()
+-		box := styles.CardActive.Render(view)
+-		return fmt.Sprintf("  %s\n\n%s", styles.Subtitle.Render(title+":"), "  "+box)
+-	}
+ 	return fmt.Sprintf("  %s\n\n  %s", styles.Subtitle.Render(title+":"), in.View())
+ }
+ 
+diff --git a/internal/tui/dns_record_list.go b/internal/tui/dns_record_list.go
+index d24c54f..fff3601 100644
+--- a/internal/tui/dns_record_list.go
++++ b/internal/tui/dns_record_list.go
+@@ -99,8 +99,20 @@ func (m *dnsRecordListModel) applyFilter() {
+ 			m.cursor = 0
+ 		}
+ 	}
+-	if m.listStart >= len(m.filtered) {
+-		m.listStart = 0
++	m.updateScroll()
++}
++
++func (m *dnsRecordListModel) updateScroll() {
++	headerH, footerH, statusH := 3, 1, 1 // approximate
++	contentH := max(m.height-headerH-footerH-statusH, 1)
++	filterBarH := 1
++	tableH := max(contentH-filterBarH-1, 1)
++	visibleRows := max(tableH-3, 1)
++
++	if m.cursor < m.listStart {
++		m.listStart = m.cursor
++	} else if m.cursor >= m.listStart+visibleRows {
++		m.listStart = m.cursor - visibleRows + 1
+ 	}
+ }
+ 
+@@ -113,13 +125,22 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 		m.height = msg.Height
+ 
+ 	case tea.KeyMsg:
++		if m.loading {
++			if msg.String() == "ctrl+c" {
++				if !m.embedded {
++					return m, tea.Quit
++				}
++			}
++			return m, nil
++		}
++
+ 		switch msg.String() {
+ 		case "esc", "backspace":
+ 			if m.embedded {
+ 				return m, func() tea.Msg { return dnsNavigateBackMsg{} }
+ 			}
+ 			return m, tea.Quit
+-		case "q":
++		case "ctrl+c", "q":
+ 			if !m.embedded {
+ 				return m, tea.Quit
+ 			}
+@@ -127,12 +148,21 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 			if m.cursor > 0 {
+ 				m.cursor--
+ 			}
++			m.updateScroll()
+ 		case "down", "j":
+ 			if m.cursor < len(m.filtered)-1 {
+ 				m.cursor++
+ 			}
++			m.updateScroll()
++		case "g":
++			m.cursor = 0
++			m.updateScroll()
++		case "G":
++			if len(m.filtered) > 0 {
++				m.cursor = len(m.filtered) - 1
++			}
++			m.updateScroll()
+ 		case "f":
+-			// Cycle type filter
+ 			idx := 0
+ 			for i, t := range m.typeTypes {
+ 				if t == m.typeFilter {
+@@ -179,10 +209,9 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 		m.records = msg.records
+ 		m.applyFilter()
+ 
+-		status := fmt.Sprintf("Loaded %d records.", len(m.records))
++		status := fmt.Sprintf("%d record(s)", len(m.records))
+ 		if m.persistentStatus != "" {
+ 			status = m.persistentStatus + " | " + status
+-			// We keep persistentStatus around until the user does something else
+ 		}
+ 		m.status = status
+ 
+@@ -204,49 +233,96 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ }
+ 
+ func (m dnsRecordListModel) View() string {
++	if m.width == 0 || m.height == 0 {
++		return ""
++	}
++
+ 	header := components.Header(m.width, "dns > "+m.domain, m.providerName)
+ 
+-	bindings := []components.KeyBinding{
+-		{Key: "j/k", Desc: "nav"},
+-		{Key: "enter", Desc: "show"},
+-		{Key: "c", Desc: "create"},
+-		{Key: "d", Desc: "delete"},
+-		{Key: "e", Desc: "edit"},
+-		{Key: "f", Desc: "filter"},
+-		{Key: "esc", Desc: "back"},
+-	}
+-	if !m.embedded {
+-		bindings = append(bindings, components.KeyBinding{Key: "q", Desc: "quit"})
++	var footerBindings []components.KeyBinding
++	if m.loading {
++		footerBindings = []components.KeyBinding{
++			{Key: "ctrl+c", Desc: "quit"},
++		}
++	} else {
++		footerBindings = []components.KeyBinding{
++			{Key: "j/k", Desc: "nav"},
++			{Key: "enter", Desc: "show"},
++			{Key: "c", Desc: "create"},
++			{Key: "d", Desc: "delete"},
++			{Key: "e", Desc: "edit"},
++			{Key: "f", Desc: "filter"},
++			{Key: "esc", Desc: "back"},
++		}
++		if !m.embedded {
++			footerBindings = append(footerBindings, components.KeyBinding{Key: "q", Desc: "quit"})
++		}
+ 	}
+-	footer := components.Footer(m.width, bindings)
++	footer := components.Footer(m.width, footerBindings)
+ 
+-	statusBar := components.StatusBar(m.width, m.status, m.statusIsError)
++	statusBar := ""
++	if m.err != nil {
++		statusBar = components.StatusBar(m.width, "Error: "+m.err.Error(), true)
++	} else if m.status != "" {
++		statusBar = components.StatusBar(m.width, m.status, m.statusIsError)
++	}
+ 
+ 	headerH := lipgloss.Height(header)
+ 	footerH := lipgloss.Height(footer)
+ 	statusH := lipgloss.Height(statusBar)
+-	contentH := m.height - headerH - footerH - statusH
+-	if contentH < 1 {
+-		contentH = 1
++	contentH := max(m.height-headerH-footerH-statusH, 1)
++
++	content := m.renderContent(contentH)
++
++	sections := []string{header, content}
++	if statusBar != "" {
++		sections = append(sections, statusBar)
+ 	}
++	sections = append(sections, footer)
++
++	return lipgloss.JoinVertical(lipgloss.Left, sections...)
++}
+ 
+-	var content string
++func (m dnsRecordListModel) renderContent(height int) string {
+ 	if m.loading {
+-		content = fmt.Sprintf("\n  %s Loading records...", m.spinner.View())
+-	} else if m.err != nil {
+-		content = fmt.Sprintf("\n  %s", styles.ErrorText.Render(m.err.Error()))
+-	} else if len(m.records) == 0 {
+-		content = "\n  No records found for this domain."
+-	} else {
+-		content = m.renderFilterBar() + "\n" + m.renderTable(contentH-2)
++		loadingText := m.spinner.View() + "  Fetching records…"
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Center,
++			styles.MutedText.Render(loadingText),
++		)
+ 	}
+ 
+-	lines := lipgloss.Height(content)
+-	if lines < contentH {
+-		content += lipgloss.NewStyle().Height(contentH - lines).Render("")
++	if m.err != nil {
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Center,
++			styles.ErrorText.Render(fmt.Sprintf("Error: %v", m.err)),
++		)
++	}
++
++	if len(m.records) == 0 {
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Center,
++			styles.MutedText.Render("No records found for this domain."),
++		)
++	}
++
++	filterBar := m.renderFilterBar()
++	tableH := max(height-lipgloss.Height(filterBar)-1, 1) // -1 for margin
++	table := m.renderTable(tableH)
++
++	// Create table + filter with space, pad remaining if needed
++	content := lipgloss.JoinVertical(lipgloss.Left, filterBar, "", table)
++
++	contentLines := strings.Split(content, "\n")
++	if len(contentLines) < height {
++		padding := strings.Repeat("\n", height-len(contentLines))
++		content += padding
+ 	}
+ 
+-	return lipgloss.JoinVertical(lipgloss.Left, header, content, statusBar, footer)
++	return content
+ }
+ 
+ func (m dnsRecordListModel) renderFilterBar() string {
+@@ -271,50 +347,65 @@ func (m dnsRecordListModel) renderFilterBar() string {
+ 
+ func (m dnsRecordListModel) renderTable(height int) string {
+ 	if len(m.filtered) == 0 {
+-		return "\n  No records match current filter."
++		return lipgloss.Place(
++			m.width, height,
++			lipgloss.Center, lipgloss.Top,
++			styles.MutedText.Render("\nNo records match the current filter."),
++		)
+ 	}
+ 
+-	cols := []int{30, 8, 40, 8}
++	type column struct {
++		title string
++		width int
++	}
+ 
+-	header := styles.TableHeader.Render(
+-		fmt.Sprintf("  %-*s %-*s %-*s %-*s",
+-			cols[0], "NAME",
+-			cols[1], "TYPE",
+-			cols[2], "CONTENT",
+-			cols[3], "TTL",
+-		),
+-	)
++	available := m.width - 4
+ 
+-	var rows []string
+-	rows = append(rows, header)
++	cols := []column{
++		{title: "NAME", width: 20},
++		{title: "TYPE", width: 8},
++		{title: "CONTENT", width: 30},
++		{title: "TTL", width: 8},
++	}
+ 
+-	if m.cursor < m.listStart {
+-		m.listStart = m.cursor
+-	} else if m.cursor >= m.listStart+(height-1) {
+-		m.listStart = m.cursor - (height - 2)
++	// Distribute remaining width to the CONTENT column
++	total := 0
++	for _, c := range cols {
++		total += c.width
++	}
++	if available > total {
++		extra := available - total
++		for i := range cols {
++			if cols[i].title == "CONTENT" {
++				cols[i].width += extra
++				break
++			}
++		}
+ 	}
+ 
+-	end := m.listStart + height - 1
++	headerCells := make([]string, len(cols))
++	for i, col := range cols {
++		headerCells[i] = styles.TableHeader.
++			Width(col.width).
++			Render(col.title)
++	}
++	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, headerCells...)
++
++	sep := styles.MutedText.Render(strings.Repeat("─", available))
++
++	visibleRows := max(height-3, 1)
++
++	end := m.listStart + visibleRows
+ 	if end > len(m.filtered) {
+ 		end = len(m.filtered)
+ 	}
+ 
++	var rows []string
++	rows = append(rows, headerRow, sep)
++
+ 	for i := m.listStart; i < end; i++ {
+ 		r := m.filtered[i]
+ 
+-		cursor := " "
+-		rowStyle := styles.TableCell
+-		if i == m.cursor {
+-			cursor = styles.AccentText.Render(">")
+-			rowStyle = styles.TableSelectedRow
+-		}
+-
+-		// Truncate content if too long
+-		contentStr := r.Content
+-		if len(contentStr) > cols[2]-2 {
+-			contentStr = contentStr[:cols[2]-5] + "..."
+-		}
+-
+ 		typeColor := styles.Value
+ 		switch r.Type {
+ 		case "A", "AAAA":
+@@ -327,14 +418,29 @@ func (m dnsRecordListModel) renderTable(height int) string {
+ 			typeColor = styles.MutedText
+ 		}
+ 
+-		row := fmt.Sprintf("%s %-*s %-*s %-*s %-*d",
+-			cursor,
+-			cols[0], r.Name,
+-			cols[1], typeColor.Render(string(r.Type)),
+-			cols[2], contentStr,
+-			cols[3], r.TTL,
+-		)
+-		rows = append(rows, rowStyle.Render(row))
++		contentStr := r.Content
++		if len(contentStr) > cols[2].width-2 {
++			contentStr = contentStr[:cols[2].width-5] + "..."
++		}
++
++		cells := []string{
++			lipgloss.NewStyle().Width(cols[0].width).Render(r.Name),
++			lipgloss.NewStyle().Width(cols[1].width).Render(typeColor.Render(string(r.Type))),
++			lipgloss.NewStyle().Width(cols[2].width).Render(contentStr),
++			lipgloss.NewStyle().Width(cols[3].width).Render(fmt.Sprintf("%d", r.TTL)),
++		}
++
++		rowContent := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
++
++		cursor := "  "
++		rowStyle := styles.TableCell
++		if i == m.cursor {
++			cursor = styles.AccentText.Render("> ")
++			rowStyle = styles.TableSelectedRow
++		}
++
++		renderedRow := lipgloss.JoinHorizontal(lipgloss.Top, cursor, rowStyle.Render(rowContent))
++		rows = append(rows, renderedRow)
+ 	}
+ 
+ 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+diff --git a/internal/tui/server_create.go b/internal/tui/server_create.go
+index b9b4ea4..287b201 100644
+--- a/internal/tui/server_create.go
++++ b/internal/tui/server_create.go
+@@ -461,6 +461,12 @@ func (m serverCreateModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 			return m, textinput.Blink
+ 		}
+ 		return m, nil
++	case "q":
++		if m.embedded {
++			return m, func() tea.Msg { return navigateBackMsg{} }
++		}
++		m.quitting = true
++		return m, tea.Quit
+ 	case "up", "k":
+ 		if cursor > 0 {
+ 			m.setListCursor(cursor - 1)
+@@ -503,6 +509,12 @@ func (m serverCreateModel) handleSSHKeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
+ 	case "esc":
+ 		m.step = stepImage
+ 		return m, nil
++	case "q":
++		if m.embedded {
++			return m, func() tea.Msg { return navigateBackMsg{} }
++		}
++		m.quitting = true
++		return m, tea.Quit
+ 	case "up", "k":
+ 		if m.sshIdx > 0 {
+ 			m.sshIdx--
+@@ -543,6 +555,12 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
+ 			m.step = stepImage
+ 		}
+ 		return m, nil
++	case "q":
++		if m.embedded {
++			return m, func() tea.Msg { return navigateBackMsg{} }
++		}
++		m.quitting = true
++		return m, tea.Quit
+ 	case "left", "h":
+ 		if m.confirmIdx > 0 {
+ 			m.confirmIdx--
+diff --git a/internal/tui/server_list.go b/internal/tui/server_list.go
+index d0ac7c4..166af89 100644
+--- a/internal/tui/server_list.go
++++ b/internal/tui/server_list.go
+@@ -30,8 +30,9 @@ type serverListModel struct {
+ 	provider     domain.Provider
+ 	providerName string
+ 
+-	servers []domain.Server
+-	cursor  int
++	servers   []domain.Server
++	cursor    int
++	listStart int // for scrolling
+ 
+ 	width  int
+ 	height int
+@@ -205,6 +206,19 @@ func (m serverListModel) applyToggleOutcome(outcome *toggleOutcome, pollerCmd te
+ 	return m, nil
+ }
+ 
++// updateScroll ensures the cursor is always visible within the listStart bounds.
++func (m *serverListModel) updateScroll() {
++	headerH, footerH, statusH := 3, 1, 1 // approximate
++	contentH := max(m.height-headerH-footerH-statusH, 1)
++	visibleRows := max(contentH-3, 1)
++
++	if m.cursor < m.listStart {
++		m.listStart = m.cursor
++	} else if m.cursor >= m.listStart+visibleRows {
++		m.listStart = m.cursor - visibleRows + 1
++	}
++}
++
+ // --- Key handling ---
+ 
+ func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+@@ -228,19 +242,23 @@ func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 	case "up", "k":
+ 		if m.cursor > 0 {
+ 			m.cursor--
++			m.updateScroll()
+ 		}
+ 
+ 	case "down", "j":
+ 		if m.cursor < len(m.servers)-1 {
+ 			m.cursor++
++			m.updateScroll()
+ 		}
+ 
+ 	case "g":
+ 		m.cursor = 0
++		m.updateScroll()
+ 
+ 	case "G":
+ 		if len(m.servers) > 0 {
+ 			m.cursor = len(m.servers) - 1
++			m.updateScroll()
+ 		}
+ 
+ 	case "enter":
+@@ -464,19 +482,13 @@ func (m serverListModel) renderTable(height int) string {
+ 		// header + sep + bottom padding
+ 		height-3, 1)
+ 
+-	// Scrolling: keep cursor visible.
+-	startIdx := 0
+-	if m.cursor >= visibleRows {
+-		startIdx = m.cursor - visibleRows + 1
+-	}
+-	endIdx := startIdx + visibleRows
++	endIdx := m.listStart + visibleRows
+ 	if endIdx > len(m.servers) {
+ 		endIdx = len(m.servers)
+-		startIdx = max(endIdx-visibleRows, 0)
+ 	}
+ 
+ 	rows := make([]string, 0, visibleRows)
+-	for i := startIdx; i < endIdx; i++ {
++	for i := m.listStart; i < endIdx; i++ {
+ 		s := m.servers[i]
+ 		isSelected := i == m.cursor
+ 
+diff --git a/internal/tui/ssh_key_add.go b/internal/tui/ssh_key_add.go
+index e0414bf..45f2ab4 100644
+--- a/internal/tui/ssh_key_add.go
++++ b/internal/tui/ssh_key_add.go
+@@ -318,7 +318,7 @@ func (m sshKeyAddModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 
+ func (m sshKeyAddModel) handleSourceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 	switch msg.String() {
+-	case "esc":
++	case "esc", "q":
+ 		m.quitting = true
+ 		return m, tea.Quit
+ 	case "up", "k", "left", "h":
+@@ -445,6 +445,9 @@ func (m sshKeyAddModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 	case "esc":
+ 		m.step = sshStepName
+ 		return m, nil
++	case "q":
++		m.quitting = true
++		return m, tea.Quit
+ 	case "left", "h":
+ 		if m.confirmIdx > 0 {
+ 			m.confirmIdx--

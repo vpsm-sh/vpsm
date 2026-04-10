@@ -461,6 +461,12 @@ func (m serverCreateModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 		return m, nil
+	case "q":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
+		m.quitting = true
+		return m, tea.Quit
 	case "up", "k":
 		if cursor > 0 {
 			m.setListCursor(cursor - 1)
@@ -503,6 +509,12 @@ func (m serverCreateModel) handleSSHKeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	case "esc":
 		m.step = stepImage
 		return m, nil
+	case "q":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
+		m.quitting = true
+		return m, tea.Quit
 	case "up", "k":
 		if m.sshIdx > 0 {
 			m.sshIdx--
@@ -543,6 +555,12 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			m.step = stepImage
 		}
 		return m, nil
+	case "q":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
+		m.quitting = true
+		return m, tea.Quit
 	case "left", "h":
 		if m.confirmIdx > 0 {
 			m.confirmIdx--
@@ -632,10 +650,7 @@ func (m serverCreateModel) View() string {
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH, 1)
 
 	content := m.renderContent(contentH)
 
@@ -749,10 +764,7 @@ func (m serverCreateModel) renderListStep(title string, items []createItem, curs
 		start = cursor - maxVisible + 1
 	}
 
-	end := start + maxVisible
-	if end > len(items) {
-		end = len(items)
-	}
+	end := min(start+maxVisible, len(items))
 
 	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
@@ -815,10 +827,7 @@ func (m serverCreateModel) renderSSHKeysStep(maxVisible int) string {
 		m.sshStart = m.sshIdx - maxVisible + 1
 	}
 
-	end := m.sshStart + maxVisible
-	if end > len(m.sshKeys) {
-		end = len(m.sshKeys)
-	}
+	end := min(m.sshStart+maxVisible, len(m.sshKeys))
 
 	rows := make([]string, 0, end-m.sshStart)
 	for i := m.sshStart; i < end; i++ {

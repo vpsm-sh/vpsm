@@ -702,10 +702,7 @@ func (o opsOverlay) View(width, height int) string {
 	content := strings.Join(lines, "\n")
 
 	// Build card.
-	cardWidth := overlayMaxWidth
-	if cardWidth > width-4 {
-		cardWidth = width - 4
-	}
+	cardWidth := min(overlayMaxWidth, width-4)
 	if cardWidth < overlayMinWidth {
 		cardWidth = overlayMinWidth
 	}
@@ -772,14 +769,8 @@ func composeOverlay(base string, overlay string, width, height int) string {
 
 	// Position: bottom-right with 2 rows above the bottom (above footer)
 	// and 1 col margin from the right edge.
-	startRow := height - overlayH - 2
-	if startRow < 1 {
-		startRow = 1
-	}
-	startCol := width - overlayW - 1
-	if startCol < 0 {
-		startCol = 0
-	}
+	startRow := max(height-overlayH-2, 1)
+	startCol := max(width-overlayW-1, 0)
 
 	for i, oLine := range overlayLines {
 		row := startRow + i
@@ -801,10 +792,7 @@ func composeOverlay(base string, overlay string, width, height int) string {
 
 		// Overlay line + right padding to fill remaining width.
 		oLineW := lipgloss.Width(oLine)
-		rightPad := width - startCol - oLineW
-		if rightPad < 0 {
-			rightPad = 0
-		}
+		rightPad := max(width-startCol-oLineW, 0)
 
 		baseLines[row] = left + oLine + strings.Repeat(" ", rightPad)
 	}

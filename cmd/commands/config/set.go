@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/config"
+	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
 	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/util"
 
@@ -31,6 +33,7 @@ func SetCommand() *cobra.Command {
 // Keys not present in this map have no extra validation.
 var validators = map[string]func(cmd *cobra.Command, value string) error{
 	"default-provider": validateProvider,
+	"dns-provider":     validateDNSProvider,
 }
 
 func runSet(cmd *cobra.Command, args []string) {
@@ -66,16 +69,26 @@ func runSet(cmd *cobra.Command, args []string) {
 	fmt.Fprintf(cmd.OutOrStdout(), "%s set to %q\n", spec.Name, normalized)
 }
 
-// validateProvider checks that the given name is a registered provider.
+// validateProvider checks that the given name is a registered server provider.
 func validateProvider(cmd *cobra.Command, name string) error {
 	normalized := util.NormalizeKey(name)
 	known := providernames.List()
-	for _, p := range known {
-		if p == normalized {
-			return nil
-		}
+	if slices.Contains(known, normalized) {
+		return nil
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown provider %q\n", name)
 	fmt.Fprintf(cmd.ErrOrStderr(), "Registered providers: %v\n", known)
 	return fmt.Errorf("unknown provider %q", name)
+}
+
+// validateDNSProvider checks that the given name is a registered DNS provider.
+func validateDNSProvider(cmd *cobra.Command, name string) error {
+	normalized := util.NormalizeKey(name)
+	known := dnsproviders.List()
+	if slices.Contains(known, normalized) {
+		return nil
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown DNS provider %q\n", name)
+	fmt.Fprintf(cmd.ErrOrStderr(), "Registered DNS providers: %v\n", known)
+	return fmt.Errorf("unknown DNS provider %q", name)
 }

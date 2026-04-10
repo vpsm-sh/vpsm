@@ -15,8 +15,8 @@ import (
 // --- ListLocations tests ---
 
 func TestListLocations_HappyPath(t *testing.T) {
-	response := map[string]interface{}{
-		"locations": []interface{}{
+	response := map[string]any{
+		"locations": []any{
 			testLocationJSON(1, "fsn1", "DE", "Falkenstein"),
 			testLocationJSON(2, "nbg1", "DE", "Nuremberg"),
 			testLocationJSON(3, "ash", "US", "Ashburn"),
@@ -47,8 +47,8 @@ func TestListLocations_HappyPath(t *testing.T) {
 }
 
 func TestListLocations_EmptyList(t *testing.T) {
-	srv := newTestAPI(t, map[string]interface{}{
-		"locations": []interface{}{},
+	srv := newTestAPI(t, map[string]any{
+		"locations": []any{},
 	})
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
@@ -63,8 +63,8 @@ func TestListLocations_EmptyList(t *testing.T) {
 
 func TestListLocations_UsesCache(t *testing.T) {
 	callCount := 0
-	response := map[string]interface{}{
-		"locations": []interface{}{
+	response := map[string]any{
+		"locations": []any{
 			testLocationJSON(1, "fsn1", "DE", "Falkenstein"),
 		},
 	}
@@ -94,8 +94,8 @@ func TestListLocations_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "unauthorized",
 				"message": "unable to authenticate",
 			},
@@ -117,20 +117,20 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 	st1["cores"] = 2
 	st1["memory"] = 2.0
 	st1["disk"] = 40
-	st1["locations"] = []interface{}{
+	st1["locations"] = []any{
 		testServerTypeLocationJSON(1, "fsn1", nil),
 		testServerTypeLocationJSON(2, "nbg1", nil),
 	}
-	st1["prices"] = []interface{}{
-		map[string]interface{}{
+	st1["prices"] = []any{
+		map[string]any{
 			"location":      "fsn1",
-			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
-			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+			"price_hourly":  map[string]any{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]any{"net": "3.29", "gross": "3.92"},
 		},
-		map[string]interface{}{
+		map[string]any{
 			"location":      "nbg1",
-			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
-			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+			"price_hourly":  map[string]any{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]any{"net": "3.29", "gross": "3.92"},
 		},
 	}
 
@@ -138,19 +138,19 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 	st2["cores"] = 2
 	st2["memory"] = 4.0
 	st2["disk"] = 40
-	st2["locations"] = []interface{}{
+	st2["locations"] = []any{
 		testServerTypeLocationJSON(1, "fsn1", nil),
 	}
-	st2["prices"] = []interface{}{
-		map[string]interface{}{
+	st2["prices"] = []any{
+		map[string]any{
 			"location":      "fsn1",
-			"price_hourly":  map[string]interface{}{"net": "0.0046", "gross": "0.0055"},
-			"price_monthly": map[string]interface{}{"net": "2.69", "gross": "3.29"},
+			"price_hourly":  map[string]any{"net": "0.0046", "gross": "0.0055"},
+			"price_monthly": map[string]any{"net": "2.69", "gross": "3.29"},
 		},
 	}
 
-	response := map[string]interface{}{
-		"server_types": []interface{}{st1, st2},
+	response := map[string]any{
+		"server_types": []any{st1, st2},
 	}
 
 	srv := newTestAPI(t, response)
@@ -187,28 +187,28 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 
 func TestListServerTypes_ExcludesDeprecatedLocations(t *testing.T) {
 	st := testServerTypeJSON(1, "cpx11", "x86")
-	st["locations"] = []interface{}{
-		testServerTypeLocationJSON(1, "fsn1", map[string]interface{}{
+	st["locations"] = []any{
+		testServerTypeLocationJSON(1, "fsn1", map[string]any{
 			"announced":         "2024-01-01T00:00:00+00:00",
 			"unavailable_after": "2024-06-01T00:00:00+00:00",
 		}),
 		testServerTypeLocationJSON(2, "nbg1", nil),
 	}
-	st["prices"] = []interface{}{
-		map[string]interface{}{
+	st["prices"] = []any{
+		map[string]any{
 			"location":      "fsn1",
-			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
-			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+			"price_hourly":  map[string]any{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]any{"net": "3.29", "gross": "3.92"},
 		},
-		map[string]interface{}{
+		map[string]any{
 			"location":      "nbg1",
-			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
-			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+			"price_hourly":  map[string]any{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]any{"net": "3.29", "gross": "3.92"},
 		},
 	}
 
-	response := map[string]interface{}{
-		"server_types": []interface{}{st},
+	response := map[string]any{
+		"server_types": []any{st},
 	}
 
 	srv := newTestAPI(t, response)
@@ -232,17 +232,17 @@ func TestListServerTypes_ExcludesDeprecatedLocations(t *testing.T) {
 
 func TestListServerTypes_FallsBackToPricesWhenNoLocations(t *testing.T) {
 	st := testServerTypeJSON(1, "cpx11", "x86")
-	st["locations"] = []interface{}{} // empty locations array
-	st["prices"] = []interface{}{
-		map[string]interface{}{
+	st["locations"] = []any{} // empty locations array
+	st["prices"] = []any{
+		map[string]any{
 			"location":      "fsn1",
-			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
-			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+			"price_hourly":  map[string]any{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]any{"net": "3.29", "gross": "3.92"},
 		},
 	}
 
-	response := map[string]interface{}{
-		"server_types": []interface{}{st},
+	response := map[string]any{
+		"server_types": []any{st},
 	}
 
 	srv := newTestAPI(t, response)
@@ -267,8 +267,8 @@ func TestListServerTypes_NoPrices(t *testing.T) {
 	st := testServerTypeJSON(1, "cpx11", "x86")
 	// prices is already an empty array from the helper
 
-	response := map[string]interface{}{
-		"server_types": []interface{}{st},
+	response := map[string]any{
+		"server_types": []any{st},
 	}
 
 	srv := newTestAPI(t, response)
@@ -292,8 +292,8 @@ func TestListServerTypes_NoPrices(t *testing.T) {
 }
 
 func TestListServerTypes_EmptyList(t *testing.T) {
-	srv := newTestAPI(t, map[string]interface{}{
-		"server_types": []interface{}{},
+	srv := newTestAPI(t, map[string]any{
+		"server_types": []any{},
 	})
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
@@ -310,8 +310,8 @@ func TestListServerTypes_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "server_error",
 				"message": "internal error",
 			},
@@ -329,8 +329,8 @@ func TestListServerTypes_Non200(t *testing.T) {
 // --- ListImages tests ---
 
 func TestListImages_HappyPath(t *testing.T) {
-	response := map[string]interface{}{
-		"images": []interface{}{
+	response := map[string]any{
+		"images": []any{
 			testImageJSON(114690387, "ubuntu-24.04", "ubuntu", "24.04", "x86"),
 			testImageJSON(114690389, "debian-12", "debian", "12", "x86"),
 		},
@@ -359,8 +359,8 @@ func TestListImages_HappyPath(t *testing.T) {
 }
 
 func TestListImages_EmptyList(t *testing.T) {
-	srv := newTestAPI(t, map[string]interface{}{
-		"images": []interface{}{},
+	srv := newTestAPI(t, map[string]any{
+		"images": []any{},
 	})
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
@@ -377,8 +377,8 @@ func TestListImages_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "forbidden",
 				"message": "insufficient permissions",
 			},
@@ -395,20 +395,20 @@ func TestListImages_Non200(t *testing.T) {
 
 // --- ListSSHKeys tests ---
 
-func testSSHKeyJSON(id int, name, fingerprint, publicKey string) map[string]interface{} {
-	return map[string]interface{}{
+func testSSHKeyJSON(id int, name, fingerprint, publicKey string) map[string]any {
+	return map[string]any{
 		"id":          id,
 		"name":        name,
 		"fingerprint": fingerprint,
 		"public_key":  publicKey,
-		"labels":      map[string]interface{}{},
+		"labels":      map[string]any{},
 		"created":     "2024-01-01T00:00:00+00:00",
 	}
 }
 
 func TestListSSHKeys_HappyPath(t *testing.T) {
-	response := map[string]interface{}{
-		"ssh_keys": []interface{}{
+	response := map[string]any{
+		"ssh_keys": []any{
 			testSSHKeyJSON(1, "my-key", "b7:2f:30:a0:2f:6c:58:6c:21:04:58:61:ba:06:3b:2f", "ssh-rsa AAAA..."),
 			testSSHKeyJSON(2, "deploy-key", "a1:b2:c3:d4:e5:f6:00:11:22:33:44:55:66:77:88:99", "ssh-ed25519 AAAA..."),
 		},
@@ -437,8 +437,8 @@ func TestListSSHKeys_HappyPath(t *testing.T) {
 }
 
 func TestListSSHKeys_EmptyList(t *testing.T) {
-	srv := newTestAPI(t, map[string]interface{}{
-		"ssh_keys": []interface{}{},
+	srv := newTestAPI(t, map[string]any{
+		"ssh_keys": []any{},
 	})
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
@@ -455,8 +455,8 @@ func TestListSSHKeys_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "unauthorized",
 				"message": "unable to authenticate",
 			},
@@ -482,7 +482,7 @@ func TestCreateSSHKey_HappyPath(t *testing.T) {
 			t.Errorf("expected path /ssh_keys, got %s", r.URL.Path)
 		}
 
-		var req map[string]interface{}
+		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
 		}
@@ -495,7 +495,7 @@ func TestCreateSSHKey_HappyPath(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ssh_key": testSSHKeyJSON(42, "my-laptop", "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5..."),
 		})
 	}))
@@ -522,8 +522,8 @@ func TestCreateSSHKey_DuplicateName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "conflict",
 				"message": "SSH key with this name already exists",
 			},
@@ -542,8 +542,8 @@ func TestCreateSSHKey_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
 				"code":    "unauthorized",
 				"message": "unable to authenticate",
 			},
@@ -600,11 +600,11 @@ func TestCatalogMethods_RequestPaths(t *testing.T) {
 
 				// Return a valid empty response for each endpoint.
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"locations":    []interface{}{},
-					"server_types": []interface{}{},
-					"images":       []interface{}{},
-					"ssh_keys":     []interface{}{},
+				json.NewEncoder(w).Encode(map[string]any{
+					"locations":    []any{},
+					"server_types": []any{},
+					"images":       []any{},
+					"ssh_keys":     []any{},
 				})
 			}))
 			t.Cleanup(srv.Close)

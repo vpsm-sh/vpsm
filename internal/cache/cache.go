@@ -24,7 +24,7 @@ func NewDefault() *Cache {
 }
 
 // Get returns true if a valid cache entry was found and decoded into dest.
-func (c *Cache) Get(key string, ttl time.Duration, dest interface{}) (bool, error) {
+func (c *Cache) Get(key string, ttl time.Duration, dest any) (bool, error) {
 	if c == nil || c.dir == "" || ttl <= 0 {
 		return false, nil
 	}
@@ -55,7 +55,7 @@ func (c *Cache) Get(key string, ttl time.Duration, dest interface{}) (bool, erro
 }
 
 // Set stores data in the cache under key.
-func (c *Cache) Set(key string, data interface{}) error {
+func (c *Cache) Set(key string, data any) error {
 	if c == nil || c.dir == "" {
 		return nil
 	}

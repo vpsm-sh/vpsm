@@ -179,10 +179,7 @@ func (m configViewModel) View() string {
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
 	statusH := lipgloss.Height(statusBar)
-	contentH := m.height - headerH - footerH - statusH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH-statusH, 1)
 
 	content := m.renderContent(contentH)
 
