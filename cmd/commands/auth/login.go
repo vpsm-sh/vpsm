@@ -24,16 +24,19 @@ func LoginCommand() *cobra.Command {
 		Short: "Store credentials for a provider",
 		Long: `Store credentials for a provider using the local keychain.
 
-For single-token providers (e.g. Hetzner, Cloudflare), you will be prompted for an API token.
+For single-token providers (e.g. Hetzner, Cloudflare, Vercel), you will be prompted for an API token.
 For multi-credential providers (e.g. Porkbun), you will be prompted for each key.
 
 Cloudflare requires a scoped Account API Token (not a Global API Key)
 with Zone:Read and DNS:Edit permissions.
 
+Vercel requires a Bearer Token from your Vercel account settings.
+
 Examples:
   vpsm auth login hetzner
   vpsm auth login porkbun
-  vpsm auth login cloudflare`,
+  vpsm auth login cloudflare
+  vpsm auth login vercel`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := strings.TrimSpace(args[0])
@@ -43,7 +46,7 @@ Examples:
 
 			if !isKnownProvider(provider) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown provider %q\n", provider)
-				fmt.Fprintln(cmd.ErrOrStderr(), "Known providers: hetzner, porkbun, cloudflare")
+				fmt.Fprintln(cmd.ErrOrStderr(), "Known providers: hetzner, porkbun, cloudflare, vercel")
 				return nil
 			}
 

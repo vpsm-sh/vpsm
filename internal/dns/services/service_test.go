@@ -80,6 +80,74 @@ func (m *mockProvider) DeleteRecord(_ context.Context, d string, id string) erro
 	return m.deleteErr
 }
 
+// --- Mock search provider ---
+
+type mockSearchProvider struct {
+	mockProvider
+	searchResult *domain.SearchResult
+	searchErr    error
+	lastDomainSearch string
+}
+
+func (m *mockSearchProvider) CheckAvailability(_ context.Context, d string) (*domain.SearchResult, error) {
+	m.lastDomainSearch = d
+	return m.searchResult, m.searchErr
+}
+
+// --- SearchDomain tests ---
+
+func TestService_SearchDomain_Supported(t *testing.T) {
+	mock := &mockSearchProvider{
+		searchResult: &domain.SearchResult{
+			Domain:    "example.com",
+			Available: true,
+			Price:     "9.73",
+			Currency:  "USD",
+		},
+	}
+	svc := New(mock)
+
+	result, err := svc.SearchDomain(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.Available {
+		t.Error("expected Available=true")
+	}
+	if result.Price != "9.73" {
+		t.Errorf("Price = %q, want %q", result.Price, "9.73")
+	}
+}
+
+func TestService_SearchDomain_Unsupported(t *testing.T) {
+	svc := New(&mockProvider{}) // does NOT implement SearchProvider
+
+	_, err := svc.SearchDomain(context.Background(), "example.com")
+	if err == nil {
+		t.Fatal("expected error for unsupported provider, got nil")
+	}
+}
+
+func TestService_SearchDomain_NormalizesDomain(t *testing.T) {
+	mock := &mockSearchProvider{
+		searchResult: &domain.SearchResult{Domain: "example.com", Available: true},
+	}
+	svc := New(mock)
+
+	_, _ = svc.SearchDomain(context.Background(), "  EXAMPLE.COM.  ")
+	if mock.lastDomainSearch != "example.com" {
+		t.Errorf("lastDomainSearch = %q, want %q", mock.lastDomainSearch, "example.com")
+	}
+}
+
+func TestService_SearchDomain_EmptyDomain(t *testing.T) {
+	svc := New(&mockSearchProvider{})
+	_, err := svc.SearchDomain(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty domain, got nil")
+	}
+}
+
 // --- ListRecords tests ---
 
 func TestService_ListRecords_NormalizesDomain(t *testing.T) {

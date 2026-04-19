@@ -626,6 +626,8 @@ func TestCloudflare_BearerTokenSent(t *testing.T) {
 
 // --- Registry tests ---
 
+// --- Registry tests ---
+
 func TestCloudflare_Registry_RegisterAndGet(t *testing.T) {
 	Reset()
 	t.Cleanup(Reset)

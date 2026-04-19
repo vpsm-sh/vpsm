@@ -20,8 +20,9 @@ const (
 	porkbunSecretStore = "porkbun-secretapikey"
 )
 
-// Compile-time check that PorkbunProvider satisfies domain.Provider.
-var _ domain.Provider = (*PorkbunProvider)(nil)
+// Compile-time checks.
+var _ domain.Provider       = (*PorkbunProvider)(nil)
+var _ domain.SearchProvider = (*PorkbunProvider)(nil)
 
 // PorkbunProvider implements domain.Provider using the Porkbun API v3.
 type PorkbunProvider struct {
@@ -334,6 +335,39 @@ func (p *PorkbunProvider) DeleteRecord(ctx context.Context, domainName string, i
 	}
 
 	return nil
+}
+
+// --- Domain search ---
+
+// CheckAvailability checks whether a domain is available for registration via Porkbun.
+func (p *PorkbunProvider) CheckAvailability(ctx context.Context, domainName string) (*domain.SearchResult, error) {
+	type domainCheck struct {
+		Avail        string `json:"avail"`
+		Price        string `json:"price"`
+		RegularPrice string `json:"regularPrice"`
+		Premium      string `json:"premium"`
+	}
+
+	type response struct {
+		porkbunResponse
+		Response domainCheck `json:"response"`
+	}
+
+	var out response
+	if err := p.post(ctx, "/domain/checkDomain/"+domainName, p.authBody(), &out); err != nil {
+		return nil, fmt.Errorf("failed to check availability for %q: %w", domainName, err)
+	}
+	if err := mapAPIError(out.err()); err != nil {
+		return nil, fmt.Errorf("failed to check availability for %q: %w", domainName, err)
+	}
+
+	return &domain.SearchResult{
+		Domain:    domainName,
+		Available: out.Response.Avail == "yes",
+		Premium:   out.Response.Premium == "yes",
+		Price:     out.Response.Price,
+		Renewal:   out.Response.RegularPrice,
+	}, nil
 }
 
 // --- Conversion helpers ---

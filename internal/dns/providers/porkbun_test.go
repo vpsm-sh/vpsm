@@ -367,6 +367,83 @@ func TestDeleteRecord_NotFound(t *testing.T) {
 
 // --- Registry tests ---
 
+// --- CheckAvailability tests ---
+
+func TestPorkbun_CheckAvailability_Available(t *testing.T) {
+	// Porkbun returns a nested "response" object from /domain/checkDomain.
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(porkbunSuccess(map[string]any{
+			"response": map[string]any{
+				"avail":        "yes",
+				"price":        "9.73",
+				"regularPrice": "9.73",
+				"premium":      "no",
+			},
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	result, err := p.CheckAvailability(context.Background(), "newdomain.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	want := &domain.SearchResult{
+		Domain:    "newdomain.com",
+		Available: true,
+		Premium:   false,
+		Price:     "9.73",
+		Renewal:   "9.73",
+	}
+
+	if diff := cmp.Diff(want, result); diff != "" {
+		t.Errorf("CheckAvailability mismatch (-want +got):\n%s", diff)
+	}
+
+	if capturedPath != "/domain/checkDomain/newdomain.com" {
+		t.Errorf("expected path /domain/checkDomain/newdomain.com, got %s", capturedPath)
+	}
+}
+
+func TestPorkbun_CheckAvailability_Taken(t *testing.T) {
+	srv := newStaticServer(t, porkbunSuccess(map[string]any{
+		"response": map[string]any{
+			"avail": "no",
+		},
+	}))
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	result, err := p.CheckAvailability(context.Background(), "google.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if result.Available {
+		t.Error("expected Available=false for taken domain")
+	}
+	if result.Domain != "google.com" {
+		t.Errorf("Domain = %q, want %q", result.Domain, "google.com")
+	}
+}
+
+func TestPorkbun_CheckAvailability_APIError(t *testing.T) {
+	srv := newStaticServer(t, porkbunError("Invalid API key."))
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	_, err := p.CheckAvailability(context.Background(), "example.com")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got: %v", err)
+	}
+}
+
 func TestRegistry_RegisterAndGet(t *testing.T) {
 	Reset()
 	t.Cleanup(Reset)

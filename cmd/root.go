@@ -65,6 +65,7 @@ func Execute() {
 	cobra.EnableTraverseRunHooks = true
 	dnsproviders.RegisterPorkbun()
 	dnsproviders.RegisterCloudflare()
+	dnsproviders.RegisterVercel()
 
 	var root = rootCmd()
 	root.SilenceUsage = true

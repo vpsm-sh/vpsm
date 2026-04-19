@@ -67,6 +67,13 @@ var knownSpecs = []CredentialSpec{
 			{Key: "", Prompt: "Account API Token (not Global API Key)", Secret: true},
 		},
 	},
+	{
+		Provider:    "vercel",
+		DisplayName: "Vercel",
+		Keys: []CredentialKey{
+			{Key: "", Prompt: "API Token (Bearer Token)", Secret: true},
+		},
+	},
 }
 
 // Lookup returns the CredentialSpec for the given provider name,

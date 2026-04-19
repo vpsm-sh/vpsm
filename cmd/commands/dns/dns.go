@@ -25,6 +25,7 @@ func NewCommand() *cobra.Command {
 	cmd.AddCommand(CreateCommand())
 	cmd.AddCommand(UpdateCommand())
 	cmd.AddCommand(DeleteCommand())
+	cmd.AddCommand(SearchCommand())
 
 	cmd.PersistentFlags().String("provider", "", "DNS provider to use (overrides default)")
 

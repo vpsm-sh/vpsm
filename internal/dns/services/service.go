@@ -143,6 +143,19 @@ func (s *Service) UpdateRecord(ctx context.Context, domainName string, id string
 	return err
 }
 
+// SearchDomain checks domain availability if the underlying provider supports it.
+func (s *Service) SearchDomain(ctx context.Context, domainName string) (*domain.SearchResult, error) {
+	domainName = normalizeDomain(domainName)
+	if domainName == "" {
+		return nil, fmt.Errorf("domain name is required")
+	}
+	sp, ok := s.provider.(domain.SearchProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not support domain search", s.provider.GetDisplayName())
+	}
+	return sp.CheckAvailability(ctx, domainName)
+}
+
 // DeleteRecord deletes a DNS record by domain and ID.
 func (s *Service) DeleteRecord(ctx context.Context, domainName string, id string) error {
 	domainName = normalizeDomain(domainName)
