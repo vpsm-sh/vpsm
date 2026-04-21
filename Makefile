@@ -77,6 +77,30 @@ tag:
 	git tag -a "$(TAG)" -m "Release $(TAG)"
 	git push $(REMOTE) "$(TAG)"
 
+# Auto-bump semver based on latest reachable tag, then tag and push
+.PHONY: tag-patch tag-minor tag-major
+tag-patch: BUMP := patch
+tag-minor: BUMP := minor
+tag-major: BUMP := major
+tag-patch tag-minor tag-major:
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is dirty; commit or stash before tagging."; exit 1; \
+	fi
+	@latest=$$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0"); \
+	version=$${latest#v}; \
+	version=$${version%%-*}; \
+	major=$${version%%.*}; rest=$${version#*.}; \
+	minor=$${rest%%.*}; patch=$${rest#*.}; \
+	case "$(BUMP)" in \
+		major) major=$$((major+1)); minor=0; patch=0 ;; \
+		minor) minor=$$((minor+1)); patch=0 ;; \
+		patch) patch=$$((patch+1)) ;; \
+	esac; \
+	new="v$$major.$$minor.$$patch"; \
+	echo "Bumping $$latest -> $$new"; \
+	git tag -a "$$new" -m "Release $$new"; \
+	git push $(REMOTE) "$$new"
+
 .PHONY: help
 help:
 	@echo "Usage:"
@@ -89,5 +113,8 @@ help:
 	@echo "  make release       Cross-compile for linux/darwin/windows (amd64+arm64)"
 	@echo "  make install       Install to GOPATH/bin"
 	@echo "  make tag           Create and push a git tag (TAG=v1.2.3, REMOTE=origin)"
+	@echo "  make tag-patch     Auto-bump patch from latest tag, then tag and push"
+	@echo "  make tag-minor     Auto-bump minor from latest tag, then tag and push"
+	@echo "  make tag-major     Auto-bump major from latest tag, then tag and push"
 	@echo ""
 	@echo "Override version:  make build VERSION=1.0.0"
