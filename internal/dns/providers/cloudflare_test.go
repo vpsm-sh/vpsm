@@ -19,9 +19,10 @@ import (
 // --- Test helpers ---
 
 // newTestCloudflareProvider creates a CloudflareProvider pointed at the given test server.
+// The account ID is pre-populated so search tests don't need to mock account discovery.
 func newTestCloudflareProvider(t *testing.T, serverURL string) *CloudflareProvider {
 	t.Helper()
-	p := NewCloudflareProvider("test-token")
+	p := NewCloudflareProvider("test-token", "acct-123")
 	p.baseURL = serverURL
 	return p
 }
@@ -603,6 +604,142 @@ func TestCloudflare_DeleteRecord_NotFound(t *testing.T) {
 	}
 }
 
+// --- CheckAvailability tests ---
+
+func TestCloudflare_CheckAvailability_Available(t *testing.T) {
+	var capturedBody cfDomainCheckBody
+	var capturedPath string
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
+			capturedPath = r.URL.Path
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cfSuccessEnvelope(map[string]any{
+				"domains": []any{
+					map[string]any{
+						"name":        "newdomain.com",
+						"registrable": true,
+						"tier":        "standard",
+						"pricing": map[string]any{
+							"currency":          "USD",
+							"registration_cost": "9.77",
+							"renewal_cost":      "9.77",
+						},
+					},
+				},
+			}))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	result, err := p.CheckAvailability(context.Background(), "newdomain.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	want := &domain.SearchResult{
+		Domain:    "newdomain.com",
+		Available: true,
+		Price:     "9.77",
+		Renewal:   "9.77",
+		Currency:  "USD",
+	}
+
+	if diff := cmp.Diff(want, result); diff != "" {
+		t.Errorf("CheckAvailability mismatch (-want +got):\n%s", diff)
+	}
+
+	if capturedPath != "/accounts/acct-123/registrar/domain-check" {
+		t.Errorf("expected check path with account id, got %s", capturedPath)
+	}
+	if len(capturedBody.Domains) != 1 || capturedBody.Domains[0] != "newdomain.com" {
+		t.Errorf("expected body domains=[newdomain.com], got %+v", capturedBody.Domains)
+	}
+}
+
+func TestCloudflare_CheckAvailability_Taken(t *testing.T) {
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cfSuccessEnvelope(map[string]any{
+				"domains": []any{
+					map[string]any{
+						"name":        "google.com",
+						"registrable": false,
+						"reason":      "not_available",
+					},
+				},
+			}))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	result, err := p.CheckAvailability(context.Background(), "google.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Available {
+		t.Error("expected Available=false for taken domain")
+	}
+	if result.Domain != "google.com" {
+		t.Errorf("Domain = %q, want %q", result.Domain, "google.com")
+	}
+}
+
+func TestCloudflare_CheckAvailability_MissingAccountID(t *testing.T) {
+	p := NewCloudflareProvider("test-token", "")
+
+	_, err := p.CheckAvailability(context.Background(), "example.com")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "account ID required") {
+		t.Errorf("expected 'account ID required' in error, got: %v", err)
+	}
+}
+
+func TestCloudflare_CheckAvailability_Unauthorized(t *testing.T) {
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(cfErrorEnvelope(9109, "Invalid access token"))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	_, err := p.CheckAvailability(context.Background(), "example.com")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got: %v", err)
+	}
+}
+
+func TestCloudflare_CheckAvailability_RateLimited(t *testing.T) {
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(cfErrorEnvelope(10013, "Rate limit exceeded"))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	_, err := p.CheckAvailability(context.Background(), "example.com")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+}
+
 // --- Auth header tests ---
 
 func TestCloudflare_BearerTokenSent(t *testing.T) {
@@ -634,6 +771,7 @@ func TestCloudflare_Registry_RegisterAndGet(t *testing.T) {
 
 	store := auth.NewMockStore()
 	store.SetToken(cloudflareTokenStore, "cf-test-token")
+	store.SetToken(cloudflareAccountIDStore, "acct-xyz")
 
 	RegisterCloudflare()
 
@@ -643,6 +781,37 @@ func TestCloudflare_Registry_RegisterAndGet(t *testing.T) {
 	}
 	if p.GetDisplayName() != "Cloudflare" {
 		t.Errorf("GetDisplayName = %q, want %q", p.GetDisplayName(), "Cloudflare")
+	}
+
+	cf, ok := p.(*CloudflareProvider)
+	if !ok {
+		t.Fatalf("expected *CloudflareProvider, got %T", p)
+	}
+	if cf.accountID != "acct-xyz" {
+		t.Errorf("accountID = %q, want %q", cf.accountID, "acct-xyz")
+	}
+}
+
+func TestCloudflare_Registry_MissingAccountIDIsOptional(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	store := auth.NewMockStore()
+	store.SetToken(cloudflareTokenStore, "cf-test-token")
+	// No account ID set — provider should still load for DNS operations.
+
+	RegisterCloudflare()
+
+	p, err := Get("cloudflare", store)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	cf, ok := p.(*CloudflareProvider)
+	if !ok {
+		t.Fatalf("expected *CloudflareProvider, got %T", p)
+	}
+	if cf.accountID != "" {
+		t.Errorf("accountID = %q, want empty", cf.accountID)
 	}
 }
 
