@@ -22,11 +22,12 @@
   - Provider: `internal/dns/providers/porkbun.go`
   - Timeout: 30s
 
-- Cloudflare API v4 - Domain listing, DNS record CRUD
+- Cloudflare API v4 - Domain listing, DNS record CRUD, domain search
   - SDK: Direct HTTP client (no SDK, intentionally lightweight)
   - Base URL: `https://api.cloudflare.com/client/v4`
   - Auth: Scoped Account API Token (not Global API Key) stored under key `cloudflare`
-  - Required permissions: Zone:Read, DNS:Edit
+  - Required permissions: Zone:Read, DNS:Edit; Account:Read + Registrar for domain search
+  - Account ID is auto-discovered from the token on first search call and cached per instance.
   - Provider: `internal/dns/providers/cloudflare.go`
   - Timeout: 30s
 
