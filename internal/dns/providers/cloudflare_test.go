@@ -19,9 +19,10 @@ import (
 // --- Test helpers ---
 
 // newTestCloudflareProvider creates a CloudflareProvider pointed at the given test server.
+// The account ID is pre-populated so search tests don't need to mock account discovery.
 func newTestCloudflareProvider(t *testing.T, serverURL string) *CloudflareProvider {
 	t.Helper()
-	p := NewCloudflareProvider("test-token")
+	p := NewCloudflareProvider("test-token", "acct-123")
 	p.baseURL = serverURL
 	return p
 }
@@ -609,12 +610,6 @@ func TestCloudflare_CheckAvailability_Available(t *testing.T) {
 	var capturedBody cfDomainCheckBody
 	var capturedPath string
 	srv := newCFRouter(t, map[string]http.HandlerFunc{
-		"GET /accounts": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{
-				map[string]any{"id": "acct-123", "name": "Test Account"},
-			}, 1, 1, 1))
-		},
 		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
 			capturedPath = r.URL.Path
 			json.NewDecoder(r.Body).Decode(&capturedBody)
@@ -665,12 +660,6 @@ func TestCloudflare_CheckAvailability_Available(t *testing.T) {
 
 func TestCloudflare_CheckAvailability_Taken(t *testing.T) {
 	srv := newCFRouter(t, map[string]http.HandlerFunc{
-		"GET /accounts": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{
-				map[string]any{"id": "acct-123", "name": "Test Account"},
-			}, 1, 1, 1))
-		},
 		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(cfSuccessEnvelope(map[string]any{
@@ -699,61 +688,21 @@ func TestCloudflare_CheckAvailability_Taken(t *testing.T) {
 	}
 }
 
-func TestCloudflare_CheckAvailability_CachesAccountID(t *testing.T) {
-	accountsCalls := 0
-	srv := newCFRouter(t, map[string]http.HandlerFunc{
-		"GET /accounts": func(w http.ResponseWriter, r *http.Request) {
-			accountsCalls++
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{
-				map[string]any{"id": "acct-123", "name": "Test Account"},
-			}, 1, 1, 1))
-		},
-		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfSuccessEnvelope(map[string]any{
-				"domains": []any{
-					map[string]any{"name": "a.com", "registrable": true},
-				},
-			}))
-		},
-	})
-
-	p := newTestCloudflareProvider(t, srv.URL)
-
-	for i := 0; i < 3; i++ {
-		if _, err := p.CheckAvailability(context.Background(), "a.com"); err != nil {
-			t.Fatalf("call %d: unexpected error: %v", i, err)
-		}
-	}
-
-	if accountsCalls != 1 {
-		t.Errorf("expected /accounts to be called once (cached), got %d calls", accountsCalls)
-	}
-}
-
-func TestCloudflare_CheckAvailability_NoAccounts(t *testing.T) {
-	srv := newCFRouter(t, map[string]http.HandlerFunc{
-		"GET /accounts": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{}, 1, 1, 0))
-		},
-	})
-
-	p := newTestCloudflareProvider(t, srv.URL)
+func TestCloudflare_CheckAvailability_MissingAccountID(t *testing.T) {
+	p := NewCloudflareProvider("test-token", "")
 
 	_, err := p.CheckAvailability(context.Background(), "example.com")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, domain.ErrUnauthorized) {
-		t.Errorf("expected ErrUnauthorized, got: %v", err)
+	if !strings.Contains(err.Error(), "account ID required") {
+		t.Errorf("expected 'account ID required' in error, got: %v", err)
 	}
 }
 
 func TestCloudflare_CheckAvailability_Unauthorized(t *testing.T) {
 	srv := newCFRouter(t, map[string]http.HandlerFunc{
-		"GET /accounts": func(w http.ResponseWriter, r *http.Request) {
+		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(cfErrorEnvelope(9109, "Invalid access token"))
@@ -771,14 +720,8 @@ func TestCloudflare_CheckAvailability_Unauthorized(t *testing.T) {
 	}
 }
 
-func TestCloudflare_CheckAvailability_APIError(t *testing.T) {
+func TestCloudflare_CheckAvailability_RateLimited(t *testing.T) {
 	srv := newCFRouter(t, map[string]http.HandlerFunc{
-		"GET /accounts": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{
-				map[string]any{"id": "acct-123", "name": "Test Account"},
-			}, 1, 1, 1))
-		},
 		"POST /accounts/acct-123/registrar/domain-check": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -828,6 +771,7 @@ func TestCloudflare_Registry_RegisterAndGet(t *testing.T) {
 
 	store := auth.NewMockStore()
 	store.SetToken(cloudflareTokenStore, "cf-test-token")
+	store.SetToken(cloudflareAccountIDStore, "acct-xyz")
 
 	RegisterCloudflare()
 
@@ -837,6 +781,37 @@ func TestCloudflare_Registry_RegisterAndGet(t *testing.T) {
 	}
 	if p.GetDisplayName() != "Cloudflare" {
 		t.Errorf("GetDisplayName = %q, want %q", p.GetDisplayName(), "Cloudflare")
+	}
+
+	cf, ok := p.(*CloudflareProvider)
+	if !ok {
+		t.Fatalf("expected *CloudflareProvider, got %T", p)
+	}
+	if cf.accountID != "acct-xyz" {
+		t.Errorf("accountID = %q, want %q", cf.accountID, "acct-xyz")
+	}
+}
+
+func TestCloudflare_Registry_MissingAccountIDIsOptional(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	store := auth.NewMockStore()
+	store.SetToken(cloudflareTokenStore, "cf-test-token")
+	// No account ID set — provider should still load for DNS operations.
+
+	RegisterCloudflare()
+
+	p, err := Get("cloudflare", store)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	cf, ok := p.(*CloudflareProvider)
+	if !ok {
+		t.Fatalf("expected *CloudflareProvider, got %T", p)
+	}
+	if cf.accountID != "" {
+		t.Errorf("accountID = %q, want empty", cf.accountID)
 	}
 }
 

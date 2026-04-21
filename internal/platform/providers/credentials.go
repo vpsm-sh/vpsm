@@ -65,6 +65,7 @@ var knownSpecs = []CredentialSpec{
 		DisplayName: "Cloudflare",
 		Keys: []CredentialKey{
 			{Key: "", Prompt: "Account API Token (not Global API Key)", Secret: true},
+			{Key: "account-id", Prompt: "Account ID", Secret: false},
 		},
 	},
 	{

@@ -25,9 +25,9 @@
 - Cloudflare API v4 - Domain listing, DNS record CRUD, domain search
   - SDK: Direct HTTP client (no SDK, intentionally lightweight)
   - Base URL: `https://api.cloudflare.com/client/v4`
-  - Auth: Scoped Account API Token (not Global API Key) stored under key `cloudflare`
-  - Required permissions: Zone:Read, DNS:Edit; Account:Read + Registrar for domain search
-  - Account ID is auto-discovered from the token on first search call and cached per instance.
+  - Auth: Two keychain entries - `cloudflare` (scoped Account API Token) and `cloudflare-account-id` (Account ID)
+  - Required permissions: Zone:Read, DNS:Edit; Registrar for domain search
+  - Account ID is optional at login time but required for the domain search command; DNS operations work without it.
   - Provider: `internal/dns/providers/cloudflare.go`
   - Timeout: 30s
 
@@ -85,10 +85,11 @@ Each registry maps a normalized provider name to a `Factory` function that takes
 
 **Credential Specs:**
 - Defined in `internal/platform/providers/credentials.go`
-- Three registered providers:
+- Registered providers:
   - Hetzner: single API token
   - Porkbun: API key + secret API key (two keychain entries)
-  - Cloudflare: single Account API Token
+  - Cloudflare: Account API Token + Account ID (two keychain entries)
+  - Vercel: single API token
 
 **Login Flow:**
 - `vpsm auth login <provider>` prompts for credentials based on the provider's `CredentialSpec`
@@ -128,7 +129,8 @@ Each registry maps a normalized provider name to a `Factory` function that takes
 **Required credentials (stored in OS keychain, not env vars):**
 - Hetzner: API token (for server/SSH key operations)
 - Porkbun: API key + secret API key (for DNS operations)
-- Cloudflare: Account API token with Zone:Read + DNS:Edit (for DNS operations)
+- Cloudflare: Account API token with Zone:Read + DNS:Edit (for DNS operations); Account ID + Registrar permission required for domain search
+- Vercel: API token (for DNS operations and domain search)
 
 **No `.env` files:** This application does not use environment variables for configuration. All secrets are stored in the OS keychain and all config is in `~/.config/vpsm/config.json`.
 

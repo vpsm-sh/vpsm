@@ -24,11 +24,12 @@ func LoginCommand() *cobra.Command {
 		Short: "Store credentials for a provider",
 		Long: `Store credentials for a provider using the local keychain.
 
-For single-token providers (e.g. Hetzner, Cloudflare, Vercel), you will be prompted for an API token.
-For multi-credential providers (e.g. Porkbun), you will be prompted for each key.
+For single-token providers (e.g. Hetzner, Vercel), you will be prompted for an API token.
+For multi-credential providers (e.g. Porkbun, Cloudflare), you will be prompted for each key.
 
 Cloudflare requires a scoped Account API Token (not a Global API Key)
-with Zone:Read and DNS:Edit permissions.
+with Zone:Read and DNS:Edit permissions, plus your Account ID. To also
+use domain search, the token needs the Registrar permission.
 
 Vercel requires a Bearer Token from your Vercel account settings.
 

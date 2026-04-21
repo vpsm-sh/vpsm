@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
@@ -16,9 +15,10 @@ import (
 )
 
 const (
-	cloudflareBaseURL    = "https://api.cloudflare.com/client/v4"
-	cloudflareTimeout    = 30 * time.Second
-	cloudflareTokenStore = "cloudflare"
+	cloudflareBaseURL        = "https://api.cloudflare.com/client/v4"
+	cloudflareTimeout        = 30 * time.Second
+	cloudflareTokenStore     = "cloudflare"
+	cloudflareAccountIDStore = "cloudflare-account-id"
 )
 
 // Compile-time checks that CloudflareProvider satisfies domain.Provider
@@ -30,25 +30,26 @@ var (
 
 // CloudflareProvider implements domain.Provider using the Cloudflare API v4.
 // It authenticates via a scoped Account API Token (not a Global API Key).
-// The token needs Zone:Read and DNS:Edit permissions. Domain search also
-// requires Account:Read (for account discovery) and Registrar permissions.
+// The token needs Zone:Read and DNS:Edit permissions; domain search
+// additionally requires the Registrar permission and a stored account ID.
 // It uses a direct HTTP client rather than the official SDK to keep the
 // dependency tree light and the code consistent with other providers.
 type CloudflareProvider struct {
-	token   string
-	baseURL string
-	client  *http.Client
-
-	accountMu sync.Mutex
-	accountID string
+	token     string
+	accountID string // optional; required for domain search
+	baseURL   string
+	client    *http.Client
 }
 
-// NewCloudflareProvider creates a CloudflareProvider with the given Account API Token.
-func NewCloudflareProvider(token string) *CloudflareProvider {
+// NewCloudflareProvider creates a CloudflareProvider with the given Account API
+// Token and optional account ID. The account ID is only required for domain
+// search operations via the Registrar API.
+func NewCloudflareProvider(token, accountID string) *CloudflareProvider {
 	return &CloudflareProvider{
-		token:   token,
-		baseURL: cloudflareBaseURL,
-		client:  &http.Client{Timeout: cloudflareTimeout},
+		token:     token,
+		accountID: accountID,
+		baseURL:   cloudflareBaseURL,
+		client:    &http.Client{Timeout: cloudflareTimeout},
 	}
 }
 
@@ -59,7 +60,8 @@ func RegisterCloudflare() {
 		if err != nil {
 			return nil, fmt.Errorf("cloudflare auth: token not found (run 'vpsm auth login cloudflare'): %w", err)
 		}
-		return NewCloudflareProvider(token), nil
+		accountID, _ := store.GetToken(cloudflareAccountIDStore) // optional; needed for domain search
+		return NewCloudflareProvider(token, accountID), nil
 	})
 }
 
@@ -140,12 +142,6 @@ type cfUpdateRecordBody struct {
 	TTL      int     `json:"ttl,omitempty"`
 	Priority *int    `json:"priority,omitempty"`
 	Comment  *string `json:"comment,omitempty"`
-}
-
-// cfAccount is a minimal Cloudflare account object used for account discovery.
-type cfAccount struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
 }
 
 // cfDomainCheckBody is the request body for the registrar domain-check endpoint.
@@ -476,44 +472,16 @@ func (c *CloudflareProvider) DeleteRecord(ctx context.Context, domainName string
 
 // --- Domain search ---
 
-// resolveAccountID returns the Cloudflare account ID associated with the
-// configured API token. The result is cached on the provider so the lookup
-// happens at most once per provider instance. If the token has access to
-// multiple accounts, the first one returned by the API is used.
-func (c *CloudflareProvider) resolveAccountID(ctx context.Context) (string, error) {
-	c.accountMu.Lock()
-	defer c.accountMu.Unlock()
-
-	if c.accountID != "" {
-		return c.accountID, nil
-	}
-
-	var out cfListEnvelope[cfAccount]
-	status, err := c.doJSONWithStatus(ctx, http.MethodGet, "/accounts?per_page=1", nil, &out)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve account id: %w", err)
-	}
-	if apiErr := envelopeError(out.Success, out.Errors, status); apiErr != nil {
-		return "", fmt.Errorf("failed to resolve account id: %w", apiErr)
-	}
-	if len(out.Result) == 0 {
-		return "", fmt.Errorf("no accounts accessible to token: %w", domain.ErrUnauthorized)
-	}
-
-	c.accountID = out.Result[0].ID
-	return c.accountID, nil
-}
-
 // CheckAvailability checks whether a domain is available for registration via
-// the Cloudflare Registrar API. The configured API token must have Registrar
-// permissions and Account:Read (for automatic account resolution).
+// the Cloudflare Registrar API. The provider must be configured with an
+// account ID (stored under the "cloudflare-account-id" keychain key) and the
+// API token must have Registrar permissions.
 func (c *CloudflareProvider) CheckAvailability(ctx context.Context, domainName string) (*domain.SearchResult, error) {
-	accountID, err := c.resolveAccountID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check availability for %q: %w", domainName, err)
+	if c.accountID == "" {
+		return nil, fmt.Errorf("cloudflare: account ID required for domain search (run 'vpsm auth login cloudflare')")
 	}
 
-	path := fmt.Sprintf("/accounts/%s/registrar/domain-check", accountID)
+	path := fmt.Sprintf("/accounts/%s/registrar/domain-check", c.accountID)
 	body := cfDomainCheckBody{Domains: []string{domainName}}
 
 	var out cfEnvelope[cfDomainCheckResult]
