@@ -81,8 +81,108 @@ func TestSSHCommand_MissingID(t *testing.T) {
 
 	_, stderr := execSSH(t, "mock")
 
-	if !strings.Contains(stderr, "required flag") {
-		t.Errorf("expected 'required flag' error on stderr, got:\n%s", stderr)
+	if !strings.Contains(stderr, "server ID required") {
+		t.Errorf("expected 'server ID required' error on stderr, got:\n%s", stderr)
+	}
+}
+
+func TestSSHCommand_PositionalID(t *testing.T) {
+	mock := &sshMockProvider{
+		displayName: "Mock",
+		getServer: &domain.Server{
+			ID:         "42",
+			Name:       "test-server",
+			Status:     "off",
+			PublicIPv4: "203.0.113.42",
+		},
+	}
+
+	registerSSHMockProvider(t, "mock", mock)
+
+	_, stderr := execSSH(t, "mock", "42")
+
+	if !strings.Contains(stderr, "server 42 is not running") {
+		t.Errorf("expected 'server 42 is not running' error, got:\n%s", stderr)
+	}
+}
+
+func TestSSHCommand_UserAtID(t *testing.T) {
+	mock := &sshMockProvider{
+		displayName: "Mock",
+		getServer: &domain.Server{
+			ID:         "42",
+			Name:       "test-server",
+			Status:     "off",
+			PublicIPv4: "203.0.113.42",
+		},
+	}
+
+	registerSSHMockProvider(t, "mock", mock)
+
+	_, stderr := execSSH(t, "mock", "ubuntu@42")
+
+	if !strings.Contains(stderr, "server 42 is not running") {
+		t.Errorf("expected positional arg parsed as user@id, got:\n%s", stderr)
+	}
+}
+
+func TestSSHCommand_UserFlag(t *testing.T) {
+	mock := &sshMockProvider{
+		displayName: "Mock",
+		getServer: &domain.Server{
+			ID:         "42",
+			Name:       "test-server",
+			Status:     "off",
+			PublicIPv4: "203.0.113.42",
+		},
+	}
+
+	registerSSHMockProvider(t, "mock", mock)
+
+	_, stderr := execSSH(t, "mock", "--user", "ubuntu", "42")
+
+	if !strings.Contains(stderr, "server 42 is not running") {
+		t.Errorf("expected --user flag accepted, got:\n%s", stderr)
+	}
+}
+
+func TestSSHCommand_UserFlagShorthand(t *testing.T) {
+	mock := &sshMockProvider{
+		displayName: "Mock",
+		getServer: &domain.Server{
+			ID:         "42",
+			Name:       "test-server",
+			Status:     "off",
+			PublicIPv4: "203.0.113.42",
+		},
+	}
+
+	registerSSHMockProvider(t, "mock", mock)
+
+	_, stderr := execSSH(t, "mock", "-U", "ubuntu", "42")
+
+	if !strings.Contains(stderr, "server 42 is not running") {
+		t.Errorf("expected -U shorthand accepted, got:\n%s", stderr)
+	}
+}
+
+func TestSSHCommand_DeprecatedIDFlag(t *testing.T) {
+	mock := &sshMockProvider{
+		displayName: "Mock",
+		getServer: &domain.Server{
+			ID:         "42",
+			Name:       "test-server",
+			Status:     "off",
+			PublicIPv4: "203.0.113.42",
+		},
+	}
+
+	registerSSHMockProvider(t, "mock", mock)
+
+	_, stderr := execSSH(t, "mock", "--id", "42")
+
+	if !strings.Contains(stderr, "server 42 is not running") {
+		t.Errorf("expected deprecated --id flag to work, got:\n%s", stderr)
 	}
 }
 
@@ -152,5 +252,30 @@ func TestSSHCommand_UnknownProvider(t *testing.T) {
 
 	if !strings.Contains(stderr, "unknown provider") {
 		t.Errorf("expected 'unknown provider' error on stderr, got:\n%s", stderr)
+	}
+}
+
+func TestParseSSHTarget(t *testing.T) {
+	tests := []struct {
+		target   string
+		wantUser string
+		wantID   string
+	}{
+		{"42", "", "42"},
+		{"ubuntu@42", "ubuntu", "42"},
+		{"user@name@42", "user", "name@42"},
+		{"root@10", "root", "10"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.target, func(t *testing.T) {
+			gotUser, gotID := parseSSHTarget(tt.target)
+			if gotUser != tt.wantUser {
+				t.Errorf("user = %q, want %q", gotUser, tt.wantUser)
+			}
+			if gotID != tt.wantID {
+				t.Errorf("id = %q, want %q", gotID, tt.wantID)
+			}
+		})
 	}
 }

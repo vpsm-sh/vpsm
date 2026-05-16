@@ -3,6 +3,8 @@ package dns
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 
 	dnsdomain "nathanbeddoewebdev/vpsm/internal/dns/domain"
 
@@ -12,16 +14,17 @@ import (
 // CreateCommand returns the "dns create" subcommand.
 func CreateCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "create <domain>",
-		Short: "Create a DNS record",
+		Use:          "create <domain>",
+		Short:        "Create a DNS record",
 		Long: `Create a new DNS record for the given domain.
 
 Examples:
   vpsm dns create example.com --type A --name www --content 1.2.3.4
   vpsm dns create example.com --type MX --content mail.example.com --priority 10
   vpsm dns create example.com --type TXT --name _dmarc --content "v=DMARC1; p=none"`,
-		Args: cobra.ExactArgs(1),
-		Run:  runCreate,
+		Args:         cobra.ExactArgs(1),
+		RunE:         runCreate,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("type", "", "Record type (A, AAAA, CNAME, MX, TXT, etc.) [required]")
@@ -37,7 +40,7 @@ Examples:
 	return cmd
 }
 
-func runCreate(cmd *cobra.Command, args []string) {
+func runCreate(cmd *cobra.Command, args []string) error {
 	domainName := args[0]
 	recordType, _ := cmd.Flags().GetString("type")
 	name, _ := cmd.Flags().GetString("name")
@@ -48,10 +51,13 @@ func runCreate(cmd *cobra.Command, args []string) {
 
 	svc, err := newDNSService(cmd)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
-	rec, err := svc.CreateRecord(context.Background(), domainName, dnsdomain.CreateRecordOpts{
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	rec, err := svc.CreateRecord(ctx, domainName, dnsdomain.CreateRecordOpts{
 		Name:     name,
 		Type:     dnsdomain.RecordType(recordType),
 		Content:  content,
@@ -60,10 +66,10 @@ func runCreate(cmd *cobra.Command, args []string) {
 		Notes:    notes,
 	})
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error creating record: %v\n", err)
-		return
+		return fmt.Errorf("failed to create record: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Created record %s (%s %s -> %s)\n",
 		rec.ID, rec.Type, rec.Name, rec.Content)
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"text/tabwriter"
 
@@ -16,15 +17,16 @@ import (
 // ListCommand returns the "dns list" subcommand.
 func ListCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list <domain>",
-		Short: "List DNS records for a domain",
+		Use:          "list <domain>",
+		Short:        "List DNS records for a domain",
 		Long: `List all DNS records for the given domain.
 
 Examples:
   vpsm dns list example.com
   vpsm dns list example.com --type A`,
-		Args: cobra.ExactArgs(1),
-		Run:  runList,
+		Args:         cobra.ExactArgs(1),
+		RunE:         runList,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("type", "", "Filter records by type (A, AAAA, CNAME, MX, TXT, etc.)")
@@ -32,29 +34,28 @@ Examples:
 	return cmd
 }
 
-func runList(cmd *cobra.Command, args []string) {
+func runList(cmd *cobra.Command, args []string) error {
 	domainName := args[0]
 	typeFilter, _ := cmd.Flags().GetString("type")
 
 	svc, err := newDNSService(cmd)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	providerName := cmd.Flag("provider").Value.String()
 
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		if _, err := dnstui.RunDNSApp(svc, providerName, domainName); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error running TUI: %v\n", err)
-		}
-		return
+		_, err = dnstui.RunDNSApp(svc, providerName, domainName)
+		return err
 	}
 
-	records, err := svc.ListRecords(context.Background(), domainName)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	records, err := svc.ListRecords(ctx, domainName)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error listing records: %v\n", err)
-		return
+		return fmt.Errorf("failed to list records: %w", err)
 	}
 
 	// Apply optional type filter.
@@ -70,7 +71,7 @@ func runList(cmd *cobra.Command, args []string) {
 
 	if len(records) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No records found.")
-		return
+		return nil
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
@@ -93,4 +94,5 @@ func runList(cmd *cobra.Command, args []string) {
 	}
 
 	w.Flush()
+	return nil
 }

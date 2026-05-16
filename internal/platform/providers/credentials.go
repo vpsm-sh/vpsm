@@ -75,6 +75,13 @@ var knownSpecs = []CredentialSpec{
 			{Key: "", Prompt: "API Token (Bearer Token)", Secret: true},
 		},
 	},
+	{
+		Provider:    "vultr",
+		DisplayName: "Vultr",
+		Keys: []CredentialKey{
+			{Key: "", Prompt: "API Token", Secret: true},
+		},
+	},
 }
 
 // Lookup returns the CredentialSpec for the given provider name,

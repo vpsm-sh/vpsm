@@ -727,10 +727,7 @@ func (o opsOverlay) View(width, height int) string {
 	content := strings.Join(lines, "\n")
 
 	// Build card.
-	cardWidth := min(overlayMaxWidth, width-4)
-	if cardWidth < overlayMinWidth {
-		cardWidth = overlayMinWidth
-	}
+	cardWidth := max(min(overlayMaxWidth, width-4), overlayMinWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Foreground(styles.Gray).

@@ -32,6 +32,7 @@ listing, a TUI wizard will guide you through the required choices.
 Examples:
   # Minimal
   vpsm server create --provider hetzner --name web-1 --image ubuntu-24.04 --type cpx11
+  vpsm server create --provider vultr --name web-1 --image 2284 --type vc2-1c-2gb --location ewr
 
   # With location and SSH keys
   vpsm server create --provider hetzner \

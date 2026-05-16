@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/signal"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -12,14 +14,15 @@ import (
 // SearchCommand returns the "dns search" subcommand.
 func SearchCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "search <domain>",
-		Short: "Check domain availability",
+		Use:          "search <domain>",
+		Short:        "Check domain availability",
 		Long: `Check if a domain name is available for registration.
 
 Example:
   vpsm dns search example.com --provider porkbun`,
-		Args: cobra.ExactArgs(1),
-		Run:  runSearch,
+		Args:         cobra.ExactArgs(1),
+		RunE:         runSearch,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringP("output", "o", "", "Output format: table or json")
@@ -27,25 +30,28 @@ Example:
 	return cmd
 }
 
-func runSearch(cmd *cobra.Command, args []string) {
+func runSearch(cmd *cobra.Command, args []string) error {
 	svc, err := newDNSService(cmd)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
-	result, err := svc.SearchDomain(context.Background(), args[0])
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	result, err := svc.SearchDomain(ctx, args[0])
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return fmt.Errorf("failed to search domain: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		enc.Encode(result)
-		return
+		if err := enc.Encode(result); err != nil {
+			return fmt.Errorf("failed to encode JSON: %w", err)
+		}
+		return nil
 	}
 
 	avail := "No"
@@ -79,4 +85,5 @@ func runSearch(cmd *cobra.Command, args []string) {
 	)
 
 	w.Flush()
+	return nil
 }

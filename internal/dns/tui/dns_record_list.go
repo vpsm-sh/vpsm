@@ -31,6 +31,7 @@ type dnsRecordListModel struct {
 	service      *services.Service
 	providerName string
 	domain       string
+	ctx          context.Context
 
 	records   []domain.Record
 	filtered  []domain.Record
@@ -53,7 +54,7 @@ type dnsRecordListModel struct {
 	embedded bool
 }
 
-func newDNSRecordListModel(svc *services.Service, providerName, domainName string, embedded bool, width, height int) dnsRecordListModel {
+func newDNSRecordListModel(svc *services.Service, providerName, domainName string, embedded bool, width, height int, ctx context.Context) dnsRecordListModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
@@ -62,6 +63,7 @@ func newDNSRecordListModel(svc *services.Service, providerName, domainName strin
 		service:      svc,
 		providerName: providerName,
 		domain:       domainName,
+		ctx:          ctx,
 		typeTypes:    []string{"", "A", "AAAA", "CNAME", "MX", "TXT"},
 		typeFilter:   "",
 		embedded:     embedded,
@@ -78,7 +80,7 @@ func (m dnsRecordListModel) Init() tea.Cmd {
 
 func (m dnsRecordListModel) loadRecordsCmd() tea.Cmd {
 	return func() tea.Msg {
-		records, err := m.service.ListRecords(context.Background(), m.domain)
+		records, err := m.service.ListRecords(m.ctx, m.domain)
 		if err != nil {
 			return dnsRecordsErrorMsg{err}
 		}
@@ -94,10 +96,7 @@ func (m *dnsRecordListModel) applyFilter() {
 		}
 	}
 	if m.cursor >= len(m.filtered) {
-		m.cursor = len(m.filtered) - 1
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
+		m.cursor = max(len(m.filtered)-1, 0)
 	}
 	m.updateScroll()
 }
@@ -395,10 +394,7 @@ func (m dnsRecordListModel) renderTable(height int) string {
 
 	visibleRows := max(height-3, 1)
 
-	end := m.listStart + visibleRows
-	if end > len(m.filtered) {
-		end = len(m.filtered)
-	}
+	end := min(m.listStart+visibleRows, len(m.filtered))
 
 	var rows []string
 	rows = append(rows, headerRow, sep)

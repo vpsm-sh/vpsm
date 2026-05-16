@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
 	"nathanbeddoewebdev/vpsm/internal/dns/services"
@@ -97,6 +99,8 @@ type dnsAppModel struct {
 	service      *services.Service
 	providerName string
 	view         dnsAppView
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	// Child models
 	domainList   dnsDomainListModel
@@ -119,6 +123,8 @@ type dnsAppModel struct {
 // RunDNSApp starts the unified DNS TUI. If initialDomain is not empty,
 // it jumps straight to the record list for that domain.
 func RunDNSApp(service *services.Service, providerName string, initialDomain string) (tea.Model, error) {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
@@ -127,6 +133,8 @@ func RunDNSApp(service *services.Service, providerName string, initialDomain str
 		service:       service,
 		providerName:  providerName,
 		view:          dnsAppViewDomainList,
+		ctx:           ctx,
+		cancel:        cancel,
 		actionSpinner: s,
 	}
 
@@ -137,17 +145,23 @@ func RunDNSApp(service *services.Service, providerName string, initialDomain str
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	return p.Run()
+	model, err := p.Run()
+	if err != nil {
+		cancel()
+		return model, err
+	}
+	cancel()
+	return model, nil
 }
 
 func (m *dnsAppModel) switchToDomainList() {
 	m.view = dnsAppViewDomainList
-	m.domainList = newDNSDomainListModel(m.service, m.providerName, true, m.width, m.height)
+	m.domainList = newDNSDomainListModel(m.service, m.providerName, true, m.width, m.height, m.ctx)
 }
 
 func (m *dnsAppModel) switchToRecordList(domain string) {
 	m.view = dnsAppViewRecordList
-	m.recordList = newDNSRecordListModel(m.service, m.providerName, domain, true, m.width, m.height)
+	m.recordList = newDNSRecordListModel(m.service, m.providerName, domain, true, m.width, m.height, m.ctx)
 }
 
 func (m *dnsAppModel) switchToRecordShow(rec domain.Record, domainName string) {
@@ -214,7 +228,7 @@ func (m dnsAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dnsNavigateToRecordDeleteMsg:
 		m.view = dnsAppViewRecordDelete
-		m.recordDelete = newDNSRecordDeleteModel(m.service, m.providerName, msg.domain, msg.record, true, m.width, m.height)
+		m.recordDelete = newDNSRecordDeleteModel(m.service, m.providerName, msg.domain, msg.record, true, m.width, m.height, m.ctx)
 		return m, m.recordDelete.Init()
 
 	// Actions
@@ -223,8 +237,9 @@ func (m dnsAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionLabel = fmt.Sprintf("Creating record for %s", msg.domain)
 		m.actionIsError = false
 		m.actionStatus = ""
+		ctx := m.ctx
 		return m, tea.Batch(m.actionSpinner.Tick, func() tea.Msg {
-			rec, err := m.service.CreateRecord(context.Background(), msg.domain, msg.opts)
+			rec, err := m.service.CreateRecord(ctx, msg.domain, msg.opts)
 			return dnsCreateResultMsg{record: rec, err: err}
 		})
 
@@ -233,8 +248,9 @@ func (m dnsAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionLabel = fmt.Sprintf("Updating record %s", msg.id)
 		m.actionIsError = false
 		m.actionStatus = ""
+		ctx := m.ctx
 		return m, tea.Batch(m.actionSpinner.Tick, func() tea.Msg {
-			err := m.service.UpdateRecord(context.Background(), msg.domain, msg.id, msg.opts)
+			err := m.service.UpdateRecord(ctx, msg.domain, msg.id, msg.opts)
 			return dnsUpdateResultMsg{err: err}
 		})
 
@@ -243,8 +259,9 @@ func (m dnsAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionLabel = fmt.Sprintf("Deleting record %s", msg.record.ID)
 		m.actionIsError = false
 		m.actionStatus = ""
+		ctx := m.ctx
 		return m, tea.Batch(m.actionSpinner.Tick, func() tea.Msg {
-			err := m.service.DeleteRecord(context.Background(), msg.domain, msg.record.ID)
+			err := m.service.DeleteRecord(ctx, msg.domain, msg.record.ID)
 			return dnsDeleteResultMsg{record: msg.record, err: err}
 		})
 

@@ -55,10 +55,7 @@ func ShowServerForm(provider domain.Provider) (*domain.Server, error) {
 	var selectedID string
 	serverOpts := buildServerOptions(servers)
 
-	height := max(len(serverOpts), 5)
-	if height > 12 {
-		height = 12
-	}
+	height := min(max(len(serverOpts), 5), 12)
 
 	selectField := huh.NewSelect[string]().
 		Title("Select a server").

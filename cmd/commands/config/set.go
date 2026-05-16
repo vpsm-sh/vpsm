@@ -21,7 +21,8 @@ func SetCommand() *cobra.Command {
 		Long: "Set a persistent configuration value.\n\n" +
 			config.KeysHelp() +
 			"\nExamples:\n" +
-			"  vpsm config set default-provider hetzner",
+			"  vpsm config set default-provider hetzner\n" +
+			"  vpsm config set default-provider vultr",
 		Args:         cobra.ExactArgs(2),
 		RunE:         runSet,
 		SilenceUsage: true,

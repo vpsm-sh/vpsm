@@ -20,6 +20,7 @@ type dnsRecordDeleteModel struct {
 	providerName string
 	domain       string
 	record       domain.Record
+	ctx          context.Context
 
 	confirmIdx int // 0 = Delete, 1 = Cancel
 	confirmed  bool
@@ -32,7 +33,7 @@ type dnsRecordDeleteModel struct {
 	height   int
 }
 
-func newDNSRecordDeleteModel(svc *services.Service, providerName, domainName string, rec domain.Record, embedded bool, width, height int) dnsRecordDeleteModel {
+func newDNSRecordDeleteModel(svc *services.Service, providerName, domainName string, rec domain.Record, embedded bool, width, height int, ctx context.Context) dnsRecordDeleteModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Red)
@@ -42,6 +43,7 @@ func newDNSRecordDeleteModel(svc *services.Service, providerName, domainName str
 		providerName: providerName,
 		domain:       domainName,
 		record:       rec,
+		ctx:          ctx,
 		confirmIdx:   1, // Default to Cancel for safety
 		embedded:     embedded,
 		width:        width,
@@ -56,7 +58,7 @@ func (m dnsRecordDeleteModel) Init() tea.Cmd {
 
 func (m dnsRecordDeleteModel) deleteCmd() tea.Cmd {
 	return func() tea.Msg {
-		err := m.service.DeleteRecord(context.Background(), m.domain, m.record.ID)
+		err := m.service.DeleteRecord(m.ctx, m.domain, m.record.ID)
 		return dnsDeleteResultMsg{record: m.record, err: err}
 	}
 }
@@ -134,10 +136,7 @@ func (m dnsRecordDeleteModel) View() string {
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH, 1)
 
 	var content string
 	if m.loading {

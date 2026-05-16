@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 )
 
@@ -35,10 +37,11 @@ var (
 // It uses a direct HTTP client rather than the official SDK to keep the
 // dependency tree light and the code consistent with other providers.
 type CloudflareProvider struct {
-	token     string
-	accountID string // optional; required for domain search
-	baseURL   string
-	client    *http.Client
+	token       string
+	accountID   string // optional; required for domain search
+	baseURL     string
+	client      *http.Client
+	retryConfig retry.Config
 }
 
 // NewCloudflareProvider creates a CloudflareProvider with the given Account API
@@ -46,10 +49,11 @@ type CloudflareProvider struct {
 // search operations via the Registrar API.
 func NewCloudflareProvider(token, accountID string) *CloudflareProvider {
 	return &CloudflareProvider{
-		token:     token,
-		accountID: accountID,
-		baseURL:   cloudflareBaseURL,
-		client:    &http.Client{Timeout: cloudflareTimeout},
+		token:       token,
+		accountID:   accountID,
+		baseURL:     cloudflareBaseURL,
+		client:      &http.Client{Timeout: cloudflareTimeout},
+		retryConfig: retry.DefaultConfig(),
 	}
 }
 
@@ -273,10 +277,30 @@ func (c *CloudflareProvider) getZoneID(ctx context.Context, domainName string) (
 	return out.Result[0].ID, nil
 }
 
+// --- Retry ---
+
+// isCloudflareRetryable determines whether an error should be retried.
+func isCloudflareRetryable(err error) bool {
+	if errors.Is(err, domain.ErrRateLimited) {
+		return true
+	}
+	return retry.IsRetryable(err)
+}
+
 // --- Provider implementation ---
 
 // ListDomains returns all zones (domains) in the Cloudflare account.
 func (c *CloudflareProvider) ListDomains(ctx context.Context) ([]domain.Domain, error) {
+	var domains []domain.Domain
+	err := retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		var err error
+		domains, err = c.listDomains(ctx)
+		return err
+	})
+	return domains, err
+}
+
+func (c *CloudflareProvider) listDomains(ctx context.Context) ([]domain.Domain, error) {
 	var allZones []cfZone
 	page := 1
 
@@ -314,6 +338,16 @@ func (c *CloudflareProvider) ListDomains(ctx context.Context) ([]domain.Domain, 
 
 // ListRecords returns all DNS records for the given domain.
 func (c *CloudflareProvider) ListRecords(ctx context.Context, domainName string) ([]domain.Record, error) {
+	var records []domain.Record
+	err := retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		var err error
+		records, err = c.listRecords(ctx, domainName)
+		return err
+	})
+	return records, err
+}
+
+func (c *CloudflareProvider) listRecords(ctx context.Context, domainName string) ([]domain.Record, error) {
 	zoneID, err := c.getZoneID(ctx, domainName)
 	if err != nil {
 		return nil, err
@@ -350,6 +384,16 @@ func (c *CloudflareProvider) ListRecords(ctx context.Context, domainName string)
 
 // GetRecord returns a single DNS record by its ID.
 func (c *CloudflareProvider) GetRecord(ctx context.Context, domainName string, id string) (*domain.Record, error) {
+	var rec *domain.Record
+	err := retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		var err error
+		rec, err = c.getRecord(ctx, domainName, id)
+		return err
+	})
+	return rec, err
+}
+
+func (c *CloudflareProvider) getRecord(ctx context.Context, domainName string, id string) (*domain.Record, error) {
 	zoneID, err := c.getZoneID(ctx, domainName)
 	if err != nil {
 		return nil, err
@@ -365,14 +409,22 @@ func (c *CloudflareProvider) GetRecord(ctx context.Context, domainName string, i
 		return nil, fmt.Errorf("failed to get record %q for %q: %w", id, domainName, apiErr)
 	}
 
-	rec := cfToDomainRecord(domainName, out.Result)
-	return &rec, nil
+	r := cfToDomainRecord(domainName, out.Result)
+	return &r, nil
 }
 
 // CreateRecord creates a new DNS record and returns the created record.
 func (c *CloudflareProvider) CreateRecord(ctx context.Context, domainName string, opts domain.CreateRecordOpts) (*domain.Record, error) {
-	zoneID, err := c.getZoneID(ctx, domainName)
-	if err != nil {
+	return c.createRecord(ctx, domainName, opts)
+}
+
+func (c *CloudflareProvider) createRecord(ctx context.Context, domainName string, opts domain.CreateRecordOpts) (*domain.Record, error) {
+	var zoneID string
+	if err := retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		var err error
+		zoneID, err = c.getZoneID(ctx, domainName)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 
@@ -404,12 +456,18 @@ func (c *CloudflareProvider) CreateRecord(ctx context.Context, domainName string
 		return nil, fmt.Errorf("failed to create record for %q: %w", domainName, apiErr)
 	}
 
-	rec := cfToDomainRecord(domainName, out.Result)
-	return &rec, nil
+	r := cfToDomainRecord(domainName, out.Result)
+	return &r, nil
 }
 
 // UpdateRecord updates an existing DNS record by its ID.
 func (c *CloudflareProvider) UpdateRecord(ctx context.Context, domainName string, id string, opts domain.UpdateRecordOpts) error {
+	return retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		return c.updateRecord(ctx, domainName, id, opts)
+	})
+}
+
+func (c *CloudflareProvider) updateRecord(ctx context.Context, domainName string, id string, opts domain.UpdateRecordOpts) error {
 	zoneID, err := c.getZoneID(ctx, domainName)
 	if err != nil {
 		return err
@@ -450,6 +508,12 @@ func (c *CloudflareProvider) UpdateRecord(ctx context.Context, domainName string
 
 // DeleteRecord deletes a DNS record by its ID.
 func (c *CloudflareProvider) DeleteRecord(ctx context.Context, domainName string, id string) error {
+	return retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		return c.deleteRecord(ctx, domainName, id)
+	})
+}
+
+func (c *CloudflareProvider) deleteRecord(ctx context.Context, domainName string, id string) error {
 	zoneID, err := c.getZoneID(ctx, domainName)
 	if err != nil {
 		return err
@@ -477,6 +541,16 @@ func (c *CloudflareProvider) DeleteRecord(ctx context.Context, domainName string
 // account ID (stored under the "cloudflare-account-id" keychain key) and the
 // API token must have Registrar permissions.
 func (c *CloudflareProvider) CheckAvailability(ctx context.Context, domainName string) (*domain.SearchResult, error) {
+	var result *domain.SearchResult
+	err := retry.Do(ctx, c.retryConfig, isCloudflareRetryable, func() error {
+		var err error
+		result, err = c.checkAvailability(ctx, domainName)
+		return err
+	})
+	return result, err
+}
+
+func (c *CloudflareProvider) checkAvailability(ctx context.Context, domainName string) (*domain.SearchResult, error) {
 	if c.accountID == "" {
 		return nil, fmt.Errorf("cloudflare: account ID required for domain search (run 'vpsm auth login cloudflare')")
 	}

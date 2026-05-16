@@ -30,6 +30,7 @@ type dnsDomainsErrorMsg struct {
 type dnsDomainListModel struct {
 	service      *services.Service
 	providerName string
+	ctx          context.Context
 
 	domains   []domain.Domain
 	cursor    int
@@ -47,7 +48,7 @@ type dnsDomainListModel struct {
 	embedded bool
 }
 
-func newDNSDomainListModel(svc *services.Service, providerName string, embedded bool, width, height int) dnsDomainListModel {
+func newDNSDomainListModel(svc *services.Service, providerName string, embedded bool, width, height int, ctx context.Context) dnsDomainListModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
@@ -55,6 +56,7 @@ func newDNSDomainListModel(svc *services.Service, providerName string, embedded 
 	return dnsDomainListModel{
 		service:      svc,
 		providerName: providerName,
+		ctx:          ctx,
 		embedded:     embedded,
 		width:        width,
 		height:       height,
@@ -69,7 +71,7 @@ func (m dnsDomainListModel) Init() tea.Cmd {
 
 func (m dnsDomainListModel) loadDomainsCmd() tea.Cmd {
 	return func() tea.Msg {
-		domains, err := m.service.ListDomains(context.Background())
+		domains, err := m.service.ListDomains(m.ctx)
 		if err != nil {
 			return dnsDomainsErrorMsg{err}
 		}
@@ -288,10 +290,7 @@ func (m dnsDomainListModel) renderTable(height int) string {
 
 	visibleRows := max(height-3, 1) // header + sep + padding
 
-	end := m.listStart + visibleRows
-	if end > len(m.domains) {
-		end = len(m.domains)
-	}
+	end := min(m.listStart+visibleRows, len(m.domains))
 
 	var rows []string
 	rows = append(rows, headerRow, sep)

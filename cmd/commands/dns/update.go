@@ -3,6 +3,8 @@ package dns
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 
 	dnsdomain "nathanbeddoewebdev/vpsm/internal/dns/domain"
 
@@ -12,15 +14,16 @@ import (
 // UpdateCommand returns the "dns update" subcommand.
 func UpdateCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "update <domain> <id>",
-		Short: "Update a DNS record",
+		Use:          "update <domain> <id>",
+		Short:        "Update a DNS record",
 		Long: `Update an existing DNS record by its ID.
 
 Examples:
   vpsm dns update example.com 106926659 --content 5.6.7.8
   vpsm dns update example.com 106926659 --content 5.6.7.8 --ttl 3600`,
-		Args: cobra.ExactArgs(2),
-		Run:  runUpdate,
+		Args:         cobra.ExactArgs(2),
+		RunE:         runUpdate,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("type", "", "New record type")
@@ -35,7 +38,7 @@ Examples:
 	return cmd
 }
 
-func runUpdate(cmd *cobra.Command, args []string) {
+func runUpdate(cmd *cobra.Command, args []string) error {
 	domainName := args[0]
 	recordID := args[1]
 	recordType, _ := cmd.Flags().GetString("type")
@@ -53,10 +56,13 @@ func runUpdate(cmd *cobra.Command, args []string) {
 
 	svc, err := newDNSService(cmd)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
-	err = svc.UpdateRecord(context.Background(), domainName, recordID, dnsdomain.UpdateRecordOpts{
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	err = svc.UpdateRecord(ctx, domainName, recordID, dnsdomain.UpdateRecordOpts{
 		Name:     name,
 		Type:     dnsdomain.RecordType(recordType),
 		Content:  content,
@@ -65,9 +71,9 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		Notes:    notesPtr,
 	})
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error updating record: %v\n", err)
-		return
+		return fmt.Errorf("failed to update record: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated record %s\n", recordID)
+	return nil
 }

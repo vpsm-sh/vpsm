@@ -97,3 +97,25 @@ func TestSet_DefaultProvider_CaseInsensitive(t *testing.T) {
 		t.Errorf("expected normalized provider name, got: %s", stdout)
 	}
 }
+
+func TestSet_DefaultProvider_Vultr(t *testing.T) {
+	setupTestConfig(t)
+	registerTestProvider(t, "vultr")
+
+	stdout, stderr := execConfig(t, "set", "default-provider", "vultr")
+
+	if stderr != "" {
+		t.Errorf("unexpected stderr: %s", stderr)
+	}
+	if !strings.Contains(stdout, `"vultr"`) {
+		t.Errorf("expected confirmation with provider name, got: %s", stdout)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.DefaultProvider != "vultr" {
+		t.Errorf("expected DefaultProvider %q, got %q", "vultr", cfg.DefaultProvider)
+	}
+}

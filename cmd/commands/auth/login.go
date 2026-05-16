@@ -37,7 +37,8 @@ Examples:
   vpsm auth login hetzner
   vpsm auth login porkbun
   vpsm auth login cloudflare
-  vpsm auth login vercel`,
+  vpsm auth login vercel
+  vpsm auth login vultr`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := strings.TrimSpace(args[0])
@@ -47,7 +48,7 @@ Examples:
 
 			if !isKnownProvider(provider) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown provider %q\n", provider)
-				fmt.Fprintln(cmd.ErrOrStderr(), "Known providers: hetzner, porkbun, cloudflare, vercel")
+				fmt.Fprintln(cmd.ErrOrStderr(), "Known providers: hetzner, porkbun, cloudflare, vercel, vultr")
 				return nil
 			}
 

@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/google/go-cmp/cmp"
@@ -22,6 +24,7 @@ func newTestPorkbunProvider(t *testing.T, serverURL string) *PorkbunProvider {
 	t.Helper()
 	p := NewPorkbunProvider("test-api-key", "test-secret-key")
 	p.baseURL = serverURL
+	p.retryConfig = retry.Config{MaxAttempts: 3, BaseDelay: 1 * time.Millisecond, MaxDelay: 5 * time.Millisecond}
 	return p
 }
 
@@ -288,6 +291,34 @@ func TestCreateRecord_APIError(t *testing.T) {
 	}
 }
 
+func TestPorkbun_CreateRecord_NoRetryOnTransientCreateError(t *testing.T) {
+	createPosts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dns/create/example.com" {
+			createPosts++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(porkbunError("rate limit exceeded"))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	_, err := p.CreateRecord(context.Background(), "example.com", domain.CreateRecordOpts{
+		Type:    domain.RecordTypeA,
+		Content: "1.1.1.1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if createPosts != 1 {
+		t.Errorf("expected 1 create POST, got %d", createPosts)
+	}
+}
+
 // --- UpdateRecord tests ---
 
 func TestUpdateRecord_HappyPath(t *testing.T) {
@@ -502,5 +533,79 @@ func TestRegistry_UnknownProvider(t *testing.T) {
 	_, err := Get("nonexistent", auth.NewMockStore())
 	if err == nil {
 		t.Fatal("expected error for unknown provider, got nil")
+	}
+}
+
+// --- Retry tests ---
+
+func TestPorkbun_Retry_RateLimitedThenSuccess(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount < 3 {
+			json.NewEncoder(w).Encode(porkbunError("rate limit exceeded"))
+			return
+		}
+		json.NewEncoder(w).Encode(porkbunSuccess(map[string]any{
+			"domains": []any{},
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error after retry, got %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls (2 rate-limited + 1 success), got %d", callCount)
+	}
+}
+
+func TestPorkbun_Retry_Exhausted(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(porkbunError("rate limit exceeded"))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestPorkbun_Retry_NoRetryOnAuthError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(porkbunError("Invalid API key"))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := newTestPorkbunProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call (no retry on auth error), got %d", callCount)
 	}
 }

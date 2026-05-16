@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/google/go-cmp/cmp"
@@ -23,6 +25,7 @@ func newTestVercelProvider(t *testing.T, serverURL string) *VercelProvider {
 	t.Helper()
 	p := NewVercelProvider("test-token", "")
 	p.baseURL = serverURL
+	p.retryConfig = retry.Config{MaxAttempts: 3, BaseDelay: 1 * time.Millisecond, MaxDelay: 5 * time.Millisecond}
 	return p
 }
 
@@ -31,6 +34,7 @@ func newTestVercelProviderWithTeam(t *testing.T, serverURL, teamID string) *Verc
 	t.Helper()
 	p := NewVercelProvider("test-token", teamID)
 	p.baseURL = serverURL
+	p.retryConfig = retry.Config{MaxAttempts: 3, BaseDelay: 1 * time.Millisecond, MaxDelay: 5 * time.Millisecond}
 	return p
 }
 
@@ -417,6 +421,78 @@ func TestVercel_CreateRecord_Conflict(t *testing.T) {
 	}
 }
 
+func TestVercel_CreateRecord_NoRetryOnTransientCreateError(t *testing.T) {
+	postCalls := 0
+	srv := newVercelRouter(t, map[string]http.HandlerFunc{
+		"POST /v2/domains/example.com/records": func(w http.ResponseWriter, r *http.Request) {
+			postCalls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": "rate_limited", "message": "Too many requests"},
+			})
+		},
+	})
+
+	p := newTestVercelProvider(t, srv.URL)
+
+	_, err := p.CreateRecord(context.Background(), "example.com", domain.CreateRecordOpts{
+		Type:    domain.RecordTypeA,
+		Content: "1.1.1.1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if postCalls != 1 {
+		t.Errorf("expected 1 create POST, got %d", postCalls)
+	}
+}
+
+func TestVercel_CreateRecord_DoesNotRepeatPostWhenFetchFails(t *testing.T) {
+	postCalls := 0
+	getCalls := 0
+	srv := newVercelRouter(t, map[string]http.HandlerFunc{
+		"POST /v2/domains/example.com/records": func(w http.ResponseWriter, r *http.Request) {
+			postCalls++
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"uid":     "rec-new",
+				"updated": 123,
+			})
+		},
+		"GET /v5/domains/example.com/records": func(w http.ResponseWriter, r *http.Request) {
+			getCalls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": "rate_limited", "message": "Too many requests"},
+			})
+		},
+	})
+
+	p := newTestVercelProvider(t, srv.URL)
+
+	_, err := p.CreateRecord(context.Background(), "example.com", domain.CreateRecordOpts{
+		Type:    domain.RecordTypeA,
+		Content: "1.1.1.1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if postCalls != 1 {
+		t.Errorf("expected 1 create POST, got %d", postCalls)
+	}
+	if getCalls != 3 {
+		t.Errorf("expected 3 follow-up GET attempts, got %d", getCalls)
+	}
+}
+
 // --- UpdateRecord tests ---
 
 func TestVercel_UpdateRecord_HappyPath(t *testing.T) {
@@ -711,6 +787,98 @@ func TestVercel_Registry_RegisterAndGet(t *testing.T) {
 	}
 	if p.GetDisplayName() != "Vercel" {
 		t.Errorf("GetDisplayName = %q, want %q", p.GetDisplayName(), "Vercel")
+	}
+}
+
+// --- Retry tests ---
+
+func TestVercel_Retry_RateLimitedThenSuccess(t *testing.T) {
+	callCount := 0
+	srv := newVercelRouter(t, map[string]http.HandlerFunc{
+		"GET /v5/domains": func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			if callCount < 3 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{"code": "rate_limited", "message": "Too many requests"},
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"domains": []any{
+					map[string]any{"name": "example.com", "verified": true, "createdAt": int64(1700000000000)},
+				},
+				"pagination": map[string]any{"count": 1, "next": int64(0), "prev": int64(0)},
+			})
+		},
+	})
+
+	p := newTestVercelProvider(t, srv.URL)
+
+	domains, err := p.ListDomains(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error after retry, got %v", err)
+	}
+	if len(domains) != 1 {
+		t.Errorf("expected 1 domain, got %d", len(domains))
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls (2 rate-limited + 1 success), got %d", callCount)
+	}
+}
+
+func TestVercel_Retry_Exhausted(t *testing.T) {
+	callCount := 0
+	srv := newVercelRouter(t, map[string]http.HandlerFunc{
+		"GET /v5/domains": func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": "rate_limited", "message": "Too many requests"},
+			})
+		},
+	})
+
+	p := newTestVercelProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestVercel_Retry_NoRetryOnAuthError(t *testing.T) {
+	callCount := 0
+	srv := newVercelRouter(t, map[string]http.HandlerFunc{
+		"GET /v5/domains": func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"code": "forbidden", "message": "Invalid token"},
+			})
+		},
+	})
+
+	p := newTestVercelProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call (no retry on auth error), got %d", callCount)
 	}
 }
 

@@ -482,10 +482,7 @@ func (m serverListModel) renderTable(height int) string {
 		// header + sep + bottom padding
 		height-3, 1)
 
-	endIdx := m.listStart + visibleRows
-	if endIdx > len(m.servers) {
-		endIdx = len(m.servers)
-	}
+	endIdx := min(m.listStart+visibleRows, len(m.servers))
 
 	rows := make([]string, 0, visibleRows)
 	for i := m.listStart; i < endIdx; i++ {

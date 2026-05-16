@@ -36,10 +36,12 @@ func rootCmd() *cobra.Command {
 multiple cloud providers. It supports creating, listing, and deleting
 servers, with interactive TUI wizards for guided workflows.
 
-Supported providers: Hetzner (more coming soon).
+Supported server providers: Hetzner, Vultr.
+Supported DNS providers: Porkbun, Cloudflare, Vercel.
 
 Quick start:
   vpsm auth login hetzner          # Store your API token
+  vpsm auth login vultr            # Store your Vultr API token
   vpsm server list                 # List all servers
   vpsm server create               # Interactive server creation
   vpsm server delete               # Interactive server deletion`,
@@ -61,6 +63,7 @@ Quick start:
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	serverproviders.RegisterHetzner()
+	serverproviders.RegisterVultr()
 	sshkeyproviders.RegisterHetzner()
 	cobra.EnableTraverseRunHooks = true
 	dnsproviders.RegisterPorkbun()

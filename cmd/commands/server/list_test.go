@@ -123,6 +123,35 @@ func TestListCommand_DisplaysServers(t *testing.T) {
 	}
 }
 
+func TestListCommand_VultrProviderName(t *testing.T) {
+	mock := &mockProvider{
+		displayName: "Vultr",
+		servers: []domain.Server{
+			{
+				ID:         "instance-1",
+				Name:       "web-1",
+				Status:     "running",
+				PublicIPv4: "203.0.113.10",
+				Region:     "ewr",
+				ServerType: "vc2-1c-2gb",
+				Image:      "Ubuntu 24.04 LTS x64",
+				Provider:   "vultr",
+			},
+		},
+	}
+
+	registerMockProvider(t, "vultr", mock)
+
+	stdout, stderr := execList(t, "vultr")
+
+	if stderr != "" {
+		t.Errorf("unexpected stderr: %s", stderr)
+	}
+	assertContainsAll(t, stdout, "stdout", []string{
+		"instance-1", "web-1", "running", "203.0.113.10", "ewr", "vc2-1c-2gb",
+	})
+}
+
 func TestListCommand_EmptyList(t *testing.T) {
 	mock := &mockProvider{
 		displayName: "Mock",

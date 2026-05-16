@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 )
 
@@ -21,24 +23,26 @@ const (
 )
 
 // Compile-time checks.
-var _ domain.Provider       = (*PorkbunProvider)(nil)
+var _ domain.Provider = (*PorkbunProvider)(nil)
 var _ domain.SearchProvider = (*PorkbunProvider)(nil)
 
 // PorkbunProvider implements domain.Provider using the Porkbun API v3.
 type PorkbunProvider struct {
-	apiKey    string
-	secretKey string
-	baseURL   string
-	client    *http.Client
+	apiKey      string
+	secretKey   string
+	baseURL     string
+	client      *http.Client
+	retryConfig retry.Config
 }
 
 // NewPorkbunProvider creates a PorkbunProvider with the given credentials.
 func NewPorkbunProvider(apiKey, secretKey string) *PorkbunProvider {
 	return &PorkbunProvider{
-		apiKey:    apiKey,
-		secretKey: secretKey,
-		baseURL:   porkbunBaseURL,
-		client:    &http.Client{Timeout: porkbunTimeout},
+		apiKey:      apiKey,
+		secretKey:   secretKey,
+		baseURL:     porkbunBaseURL,
+		client:      &http.Client{Timeout: porkbunTimeout},
+		retryConfig: retry.DefaultConfig(),
 	}
 }
 
@@ -155,10 +159,30 @@ func mapAPIError(err error) error {
 	return err
 }
 
+// --- Retry ---
+
+// isPorkbunRetryable determines whether an error should be retried.
+func isPorkbunRetryable(err error) bool {
+	if errors.Is(err, domain.ErrRateLimited) {
+		return true
+	}
+	return retry.IsRetryable(err)
+}
+
 // --- Provider implementation ---
 
 // ListDomains returns all domains in the Porkbun account.
 func (p *PorkbunProvider) ListDomains(ctx context.Context) ([]domain.Domain, error) {
+	var domains []domain.Domain
+	err := retry.Do(ctx, p.retryConfig, isPorkbunRetryable, func() error {
+		var err error
+		domains, err = p.listDomains(ctx)
+		return err
+	})
+	return domains, err
+}
+
+func (p *PorkbunProvider) listDomains(ctx context.Context) ([]domain.Domain, error) {
 	type request struct {
 		porkbunAuth
 		Start         string `json:"start,omitempty"`
@@ -201,6 +225,16 @@ func (p *PorkbunProvider) ListDomains(ctx context.Context) ([]domain.Domain, err
 
 // ListRecords returns all DNS records for the given domain.
 func (p *PorkbunProvider) ListRecords(ctx context.Context, domainName string) ([]domain.Record, error) {
+	var records []domain.Record
+	err := retry.Do(ctx, p.retryConfig, isPorkbunRetryable, func() error {
+		var err error
+		records, err = p.listRecords(ctx, domainName)
+		return err
+	})
+	return records, err
+}
+
+func (p *PorkbunProvider) listRecords(ctx context.Context, domainName string) ([]domain.Record, error) {
 	type response struct {
 		porkbunResponse
 		Records []porkbunDomainRecord `json:"records"`
@@ -223,6 +257,16 @@ func (p *PorkbunProvider) ListRecords(ctx context.Context, domainName string) ([
 
 // GetRecord returns a single DNS record by its ID.
 func (p *PorkbunProvider) GetRecord(ctx context.Context, domainName string, id string) (*domain.Record, error) {
+	var rec *domain.Record
+	err := retry.Do(ctx, p.retryConfig, isPorkbunRetryable, func() error {
+		var err error
+		rec, err = p.getRecord(ctx, domainName, id)
+		return err
+	})
+	return rec, err
+}
+
+func (p *PorkbunProvider) getRecord(ctx context.Context, domainName string, id string) (*domain.Record, error) {
 	type response struct {
 		porkbunResponse
 		Records []porkbunDomainRecord `json:"records"`
@@ -240,12 +284,16 @@ func (p *PorkbunProvider) GetRecord(ctx context.Context, domainName string, id s
 		return nil, fmt.Errorf("record %q for %q: %w", id, domainName, domain.ErrNotFound)
 	}
 
-	rec := toDomainRecord(domainName, out.Records[0])
-	return &rec, nil
+	r := toDomainRecord(domainName, out.Records[0])
+	return &r, nil
 }
 
 // CreateRecord creates a new DNS record and returns the created record with its assigned ID.
 func (p *PorkbunProvider) CreateRecord(ctx context.Context, domainName string, opts domain.CreateRecordOpts) (*domain.Record, error) {
+	return p.createRecord(ctx, domainName, opts)
+}
+
+func (p *PorkbunProvider) createRecord(ctx context.Context, domainName string, opts domain.CreateRecordOpts) (*domain.Record, error) {
 	type request struct {
 		porkbunAuth
 		Name    string `json:"name,omitempty"`
@@ -289,6 +337,12 @@ func (p *PorkbunProvider) CreateRecord(ctx context.Context, domainName string, o
 
 // UpdateRecord updates an existing DNS record by its ID.
 func (p *PorkbunProvider) UpdateRecord(ctx context.Context, domainName string, id string, opts domain.UpdateRecordOpts) error {
+	return retry.Do(ctx, p.retryConfig, isPorkbunRetryable, func() error {
+		return p.updateRecord(ctx, domainName, id, opts)
+	})
+}
+
+func (p *PorkbunProvider) updateRecord(ctx context.Context, domainName string, id string, opts domain.UpdateRecordOpts) error {
 	type request struct {
 		porkbunAuth
 		Name    string  `json:"name,omitempty"`
@@ -326,6 +380,12 @@ func (p *PorkbunProvider) UpdateRecord(ctx context.Context, domainName string, i
 
 // DeleteRecord deletes a DNS record by its ID.
 func (p *PorkbunProvider) DeleteRecord(ctx context.Context, domainName string, id string) error {
+	return retry.Do(ctx, p.retryConfig, isPorkbunRetryable, func() error {
+		return p.deleteRecord(ctx, domainName, id)
+	})
+}
+
+func (p *PorkbunProvider) deleteRecord(ctx context.Context, domainName string, id string) error {
 	var out porkbunResponse
 	if err := p.post(ctx, "/dns/delete/"+domainName+"/"+id, p.authBody(), &out); err != nil {
 		return fmt.Errorf("failed to delete record %q for %q: %w", id, domainName, err)
@@ -341,6 +401,16 @@ func (p *PorkbunProvider) DeleteRecord(ctx context.Context, domainName string, i
 
 // CheckAvailability checks whether a domain is available for registration via Porkbun.
 func (p *PorkbunProvider) CheckAvailability(ctx context.Context, domainName string) (*domain.SearchResult, error) {
+	var result *domain.SearchResult
+	err := retry.Do(ctx, p.retryConfig, isPorkbunRetryable, func() error {
+		var err error
+		result, err = p.checkAvailability(ctx, domainName)
+		return err
+	})
+	return result, err
+}
+
+func (p *PorkbunProvider) checkAvailability(ctx context.Context, domainName string) (*domain.SearchResult, error) {
 	type domainCheck struct {
 		Avail        string `json:"avail"`
 		Price        string `json:"price"`

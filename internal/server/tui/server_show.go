@@ -783,10 +783,7 @@ func (m serverShowModel) renderDetail() string {
 	usableWidth := max(m.width-(hPad*2), 60)
 
 	// Left column: ~45% of width, giving room for long values.
-	leftWidth := min(usableWidth*45/100, 52)
-	if leftWidth < 34 {
-		leftWidth = 34
-	}
+	leftWidth := max(min(usableWidth*45/100, 52), 34)
 
 	// Right column gets the rest. Needs enough room for Y-axis labels + chart.
 	rightWidth := max(usableWidth-leftWidth-columnGap, 36)

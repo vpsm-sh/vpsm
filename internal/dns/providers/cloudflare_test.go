@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/dns/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/google/go-cmp/cmp"
@@ -24,6 +26,7 @@ func newTestCloudflareProvider(t *testing.T, serverURL string) *CloudflareProvid
 	t.Helper()
 	p := NewCloudflareProvider("test-token", "acct-123")
 	p.baseURL = serverURL
+	p.retryConfig = retry.Config{MaxAttempts: 3, BaseDelay: 1 * time.Millisecond, MaxDelay: 5 * time.Millisecond}
 	return p
 }
 
@@ -483,6 +486,40 @@ func TestCloudflare_CreateRecord_Conflict(t *testing.T) {
 	}
 }
 
+func TestCloudflare_CreateRecord_NoRetryOnTransientCreateError(t *testing.T) {
+	postCalls := 0
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{
+				testCFZoneJSON("zone-123", "example.com", "active"),
+			}, 1, 1, 1))
+		},
+		"POST /zones/zone-123/dns_records": func(w http.ResponseWriter, r *http.Request) {
+			postCalls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(cfErrorEnvelope(10013, "Rate limit exceeded"))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	_, err := p.CreateRecord(context.Background(), "example.com", domain.CreateRecordOpts{
+		Type:    domain.RecordTypeA,
+		Content: "1.1.1.1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if postCalls != 1 {
+		t.Errorf("expected 1 create POST, got %d", postCalls)
+	}
+}
+
 // --- UpdateRecord tests ---
 
 func TestCloudflare_UpdateRecord_HappyPath(t *testing.T) {
@@ -827,5 +864,88 @@ func TestCloudflare_Registry_MissingToken(t *testing.T) {
 	_, err := Get("cloudflare", store)
 	if err == nil {
 		t.Fatal("expected error for missing token, got nil")
+	}
+}
+
+// --- Retry tests ---
+
+func TestCloudflare_Retry_RateLimitedThenSuccess(t *testing.T) {
+	callCount := 0
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			if callCount < 3 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				json.NewEncoder(w).Encode(cfErrorEnvelope(10013, "Rate limit exceeded"))
+				return
+			}
+			json.NewEncoder(w).Encode(cfSuccessListEnvelope([]any{
+				testCFZoneJSON("zone-1", "example.com", "active"),
+			}, 1, 1, 1))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	domains, err := p.ListDomains(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error after retry, got %v", err)
+	}
+	if len(domains) != 1 {
+		t.Errorf("expected 1 domain, got %d", len(domains))
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls (2 rate-limited + 1 success), got %d", callCount)
+	}
+}
+
+func TestCloudflare_Retry_Exhausted(t *testing.T) {
+	callCount := 0
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(cfErrorEnvelope(10013, "Rate limit exceeded"))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+	if !errors.Is(err, domain.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestCloudflare_Retry_NoRetryOnAuthError(t *testing.T) {
+	callCount := 0
+	srv := newCFRouter(t, map[string]http.HandlerFunc{
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(cfErrorEnvelope(9109, "Invalid access token"))
+		},
+	})
+
+	p := newTestCloudflareProvider(t, srv.URL)
+
+	_, err := p.ListDomains(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call (no retry on auth error), got %d", callCount)
 	}
 }
